@@ -1,0 +1,25 @@
+paths:
+  data: data/lego
+  output: outputs/dssim-training.png
+  init_ply: data/lego/init.ply
+
+runtime:
+  arch: cpu
+  seed: 7
+
+model:
+  resolution: 256
+  capacity: 10000
+  initial_splats: 1000
+  background: white
+
+training:
+  iterations: 2000
+
+loss:
+  mode: mse_dssim
+  dssim_weight: 0.2
+  dssim_start_iteration: 1000
+  dssim_full_iteration: 1800
+  dssim_sample_step: 4
+  dssim_window: 11
