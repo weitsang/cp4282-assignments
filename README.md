@@ -31,6 +31,12 @@ The repository contains a small Lego dataset under `data/lego/`:
 5. `assignments/unit10_sh_training.py`: add view-dependent spherical-harmonic colour.
 6. `assignments/unit11_dssim_training.py`: add the scheduled D-SSIM objective.
 
+Shared starter helpers include `trainable_gaussian.py` for trainable splat arrays and
+`dssim_metrics.py` for the Unit 11 image-space loss.
+
+The evaluation starter is `scripts/evaluate.py`; it is intended to report PSNR and SSIM on the
+held-out test views after a renderer or trainer produces a PLY.
+
 Starter YAML files are in `configs/`. Change paths and resource settings only after the small CPU
 case works.
 
