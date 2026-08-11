@@ -1,7 +1,7 @@
 """Train three overlapping coloured Gaussians against synthetic views with Warp.
 
 Usage:
-    python 3dgs_k_syn_trainer.py multi.png --device cpu --iterations 800
+    python 3dgs_k_syn_trainer_gpu.py multi.png --device cpu --iterations 800
 
 This is the Unit 8 extension after the one-Gaussian program. It keeps the same small synthetic
 scene and Warp tape, but alpha-composites several trainable splats for every pixel, and introduces
@@ -24,7 +24,7 @@ import warp as wp
 
 from trainable_gaussian import TrainableGaussianSet
 
-_one_gaussian = importlib.import_module("3dgs_1_syn_trainer")
+_one_gaussian = importlib.import_module("3dgs_1_syn_trainer_gpu")
 FOCAL_LENGTH = _one_gaussian.FOCAL_LENGTH
 HEIGHT = _one_gaussian.HEIGHT
 VIEWS = _one_gaussian.VIEWS

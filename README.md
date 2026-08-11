@@ -37,15 +37,15 @@ Annotated walkthroughs explain the provided skeleton code without showing the TO
 `3dgs_trainer_gpu.py`: train a 3DGS model with the Warp renderer.
 
 ```bash
-python 3dgs_trainer_gpu.py configs/warp_3dgs_training.yaml
+python 3dgs_trainer_gpu.py config/3dgs_training_gpu.yaml
 ```
 
 Shared support files include:
 
 - `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
-- `configs/`: starter YAML files for training runs
-- `3dgs_1_syn_trainer.py`: small Unit 8 trainer for one synthetic Gaussian
-- `3dgs_k_syn_trainer.py`: small Unit 8 trainer for several synthetic Gaussians
+- `config/`: starter YAML files for training runs
+- `3dgs_1_syn_trainer_gpu.py`: small Unit 8 trainer for one synthetic Gaussian
+- `3dgs_k_syn_trainer_gpu.py`: small Unit 8 trainer for several synthetic Gaussians
 
 ## Evaluating your output
 
@@ -73,7 +73,7 @@ implementation is kept separately and is not included in this repository.
 ## Running checks
 
 ```bash
-python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py 3dgs_1_syn_trainer.py 3dgs_k_syn_trainer.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
+python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py 3dgs_1_syn_trainer_gpu.py 3dgs_k_syn_trainer_gpu.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
 python scripts/check_setup.py
 ```
 

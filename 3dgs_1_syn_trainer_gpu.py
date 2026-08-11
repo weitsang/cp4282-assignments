@@ -1,7 +1,7 @@
 """Train one anisotropic 3D Gaussian against synthetic target images with Warp.
 
 Usage:
-    python 3dgs_1_syn_trainer.py training.png --device cpu --iterations 800
+    python 3dgs_1_syn_trainer_gpu.py training.png --device cpu --iterations 800
 
 This is the Unit 8 teaching trainer. It keeps the scene deliberately tiny: one Gaussian,
 three known cameras, synthetic target images, and no tiling or densification. The goal is to

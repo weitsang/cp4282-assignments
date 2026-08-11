@@ -1,7 +1,7 @@
 """Pedagogical sequential CPU 3D Gaussian Splatting renderer.
 
 Usage:
-    python vanilla_cpu_renderer.py point_cloud.ply render.png
+    python 3dgs_renderer_cpu.py point_cloud.ply render.png
 
 The input must use the conventional 3DGS vertex properties:
 x, y, z, opacity, scale_0..2, rot_0..3, and f_dc_0..2.
@@ -21,7 +21,7 @@ from plyfile import PlyData, PlyElement
 
 C0 = 0.28209479177387814  # Degree-0 real SH normalisation constant.
 # Splats are culled/composited past this many squared Mahalanobis units from centre. Shared with
-# warp_images_3dgs_training.py so the CPU reference and the Warp trainer agree on cutoff.
+# 3dgs_trainer_gpu.py so the CPU reference and the Warp trainer agree on cutoff.
 SUPPORT_RADIUS_SQUARED = 9.0
 
 

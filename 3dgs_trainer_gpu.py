@@ -1,7 +1,7 @@
 """Train anisotropic 3D Gaussian splats from NeRF-synthetic posed images with Warp.
 
 Usage:
-    python 3dgs_trainer_gpu.py configs/warp_3dgs_training.yaml
+    python 3dgs_trainer_gpu.py config/3dgs_training_gpu.yaml
 
 The data directory contains transforms_train.json and its RGBA image files. Warp owns the
 parallel raster, explicit backward pass, and Adam updates. Python owns image loading, camera
