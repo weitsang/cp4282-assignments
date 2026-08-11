@@ -585,12 +585,12 @@ def alpha_at_pixel(
 
 @wp.func
 def colour_at_view(
-    sh0: wp.vec3,
+    colors: wp.vec3,
 ):
     return wp.vec3(
-        wp.clamp(sh0[0], 0.0, 1.0),
-        wp.clamp(sh0[1], 0.0, 1.0),
-        wp.clamp(sh0[2], 0.0, 1.0),
+        wp.clamp(colors[0], 0.0, 1.0),
+        wp.clamp(colors[1], 0.0, 1.0),
+        wp.clamp(colors[2], 0.0, 1.0),
     )
 
 
@@ -600,7 +600,7 @@ def render_forward(
     log_scales: wp.array(dtype=wp.vec3),
     quaternions: wp.array(dtype=wp.vec4),
     opacity_logits: wp.array(dtype=wp.float32),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     cameras: wp.array(dtype=wp.mat44),
     targets: wp.array(dtype=wp.vec3),
     view_ids: wp.array(dtype=wp.int32),
@@ -631,7 +631,7 @@ def render_forward(
                                opacity_logits[splat], cameras[view], px, py,
                                float(width), focal)
         if alpha > 0.0:
-            colour = colour_at_view(sh0[splat])
+            colour = colour_at_view(colors[splat])
             rgb = rgb + transmittance * alpha * colour
             transmittance = transmittance * (1.0 - alpha)
             if transmittance < TRANSMITTANCE_CUTOFF:
@@ -648,7 +648,7 @@ def render_backward(
     log_scales: wp.array(dtype=wp.vec3),
     quaternions: wp.array(dtype=wp.vec4),
     opacity_logits: wp.array(dtype=wp.float32),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     cameras: wp.array(dtype=wp.mat44),
     targets: wp.array(dtype=wp.vec3),
     view_ids: wp.array(dtype=wp.int32),
@@ -664,7 +664,7 @@ def render_backward(
     scale_grad_flat: wp.array(dtype=wp.float32),
     quaternion_grad_flat: wp.array(dtype=wp.float32),
     opacity_grad: wp.array(dtype=wp.float32),
-    sh0_grad_flat: wp.array(dtype=wp.float32),
+    color_grad_flat: wp.array(dtype=wp.float32),
 ):
     thread = wp.tid()
     pixels = width * width
@@ -721,7 +721,7 @@ def adam_quaternion_step(
 @wp.kernel
 def constrain_parameters(
     log_scales: wp.array(dtype=wp.vec3),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     minimum_log_scale: float,
     maximum_log_scale: float,
 ):
@@ -732,8 +732,8 @@ def constrain_parameters(
         wp.clamp(scale[1], minimum_log_scale, maximum_log_scale),
         wp.clamp(scale[2], minimum_log_scale, maximum_log_scale),
     )
-    colour = sh0[i]
-    sh0[i] = wp.vec3(
+    colour = colors[i]
+    colors[i] = wp.vec3(
         wp.clamp(colour[0], 0.0, 1.0),
         wp.clamp(colour[1], 0.0, 1.0),
         wp.clamp(colour[2], 0.0, 1.0),
@@ -889,12 +889,12 @@ class SplatOptimizers:
         self.mean_optimizer = Adam([trainable.means], lr=learning_rates["position_initial"])
         self.scale_optimizer = Adam([trainable.log_scales], lr=learning_rates["scale"])
         self.opacity_optimizer = Adam([trainable.opacity_logits], lr=learning_rates["opacity"])
-        self.sh0_optimizer = Adam([trainable.colors], lr=learning_rates["feature_dc"])
+        self.color_optimizer = Adam([trainable.colors], lr=learning_rates["feature_dc"])
         self.optimizers = (
             self.mean_optimizer,
             self.scale_optimizer,
             self.opacity_optimizer,
-            self.sh0_optimizer,
+            self.color_optimizer,
         )
         self.quaternion_m = wp.zeros(capacity, dtype=wp.vec4, device=device)
         self.quaternion_v = wp.zeros(capacity, dtype=wp.vec4, device=device)
@@ -904,14 +904,14 @@ class SplatOptimizers:
         self.scale_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
         self.quaternion_grad_flat = wp.zeros(capacity * 4, dtype=wp.float32, device=device)
         self.opacity_grad = wp.zeros(capacity, dtype=wp.float32, device=device)
-        self.sh0_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
+        self.color_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
         self.mean_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
         self.scale_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
-        self.sh0_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
+        self.color_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
 
     def zero_gradients(self):
         for gradient in (self.mean_grad_flat, self.scale_grad_flat, self.quaternion_grad_flat,
-                         self.opacity_grad, self.sh0_grad_flat):
+                         self.opacity_grad, self.color_grad_flat):
             gradient.zero_()
 
     def pack_gradients(self, capacity):
@@ -919,7 +919,7 @@ class SplatOptimizers:
         vec3 arrays, for use as Adam inputs and as the densification statistic."""
         for flat, packed in ((self.mean_grad_flat, self.mean_grad),
                              (self.scale_grad_flat, self.scale_grad),
-                             (self.sh0_grad_flat, self.sh0_grad)):
+                             (self.color_grad_flat, self.color_grad)):
             wp.launch(pack_vec3_gradient, dim=capacity, inputs=[flat], outputs=[packed],
                       device=self.device)
 
@@ -929,7 +929,7 @@ class SplatOptimizers:
         self.mean_optimizer.step([self.mean_grad])
         self.scale_optimizer.step([self.scale_grad])
         self.opacity_optimizer.step([self.opacity_grad])
-        self.sh0_optimizer.step([self.sh0_grad])
+        self.color_optimizer.step([self.color_grad])
         wp.launch(
             adam_quaternion_step,
             dim=capacity,
@@ -1023,7 +1023,7 @@ class WarpImageTrainer:
         self.log_scales = self.trainable.log_scales
         self.quaternions = self.trainable.quaternions
         self.opacity = self.trainable.opacity_logits
-        self.sh0 = self.trainable.colors
+        self.colors = self.trainable.colors
 
     def _init_buffers(self, cameras, targets, capacity):
         """Allocate camera/target uploads, the tile workspace, optimizers, and render buffers."""
@@ -1064,7 +1064,7 @@ class WarpImageTrainer:
         wp.launch(
             render_forward,
             dim=len(view_ids) * self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
                     self.width, self.tiles_x,
                     TILE, self.focal, len(view_ids), self.background],
@@ -1074,13 +1074,13 @@ class WarpImageTrainer:
         wp.launch(
             render_backward,
             dim=len(view_ids) * self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
                     self.width, self.tiles_x,
                     TILE, self.focal, len(view_ids), self.image],
             outputs=[self.optimizers.mean_grad_flat, self.optimizers.scale_grad_flat,
                      self.optimizers.quaternion_grad_flat, self.optimizers.opacity_grad,
-                     self.optimizers.sh0_grad_flat],
+                     self.optimizers.color_grad_flat],
             device=self.device,
         )
         self.optimizers.pack_gradients(self.capacity)
@@ -1103,7 +1103,7 @@ class WarpImageTrainer:
             wp.launch(
                 render_forward,
                 dim=self.width * self.width,
-                inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+                inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                         self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
                         self.width, self.tiles_x, TILE, self.focal, 1,
                         self.background],
@@ -1119,7 +1119,7 @@ class WarpImageTrainer:
         wp.launch(
             render_forward,
             dim=self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
                     self.width, self.tiles_x, TILE, self.focal, 1,
                     self.background],
@@ -1241,7 +1241,7 @@ class WarpImageTrainer:
             constrain_parameters,
             dim=self.capacity,
             inputs=[
-                self.log_scales, self.sh0,
+                self.log_scales, self.colors,
                 np.log(self.scene_radius * SCALE_CLAMP_MIN_FRACTION),
                 np.log(self.scene_radius * SCALE_CLAMP_MAX_FRACTION),
             ],
@@ -1272,7 +1272,7 @@ class WarpImageTrainer:
         opacity = sigmoid(self.opacity.numpy())
         means, log_scales = self.means.numpy(), self.log_scales.numpy()
         quaternions, opacity_logits = self.quaternions.numpy(), self.opacity.numpy()
-        sh0 = self.sh0.numpy()
+        colors = self.colors.numpy()
         adc = self.training_options["multiview_adc"]
         prune_mask = (opacity < PRUNE_OPACITY_FLOOR) & self.active
         scores = np.linalg.norm(gradients, axis=1)
@@ -1323,14 +1323,14 @@ class WarpImageTrainer:
                 log_scales[child] = log_scales[parent]
             quaternions[child] = quaternions[parent]
             opacity_logits[child] = opacity_logits[parent]
-            sh0[child] = sh0[parent]
+            colors[child] = colors[parent]
         self.active_device.assign(self.active.astype(np.int32))
         for array, values, dtype in (
             (self.means, means, wp.vec3),
             (self.log_scales, log_scales, wp.vec3),
             (self.quaternions, quaternions, wp.vec4),
             (self.opacity, opacity_logits, wp.float32),
-            (self.sh0, sh0, wp.vec3),
+            (self.colors, colors, wp.vec3),
         ):
             array.assign(wp.array(values.astype(np.float32), dtype=dtype, device=self.device))
         self.optimizers.reset()
@@ -1342,7 +1342,7 @@ class WarpImageTrainer:
             np.exp(self.log_scales.numpy()[active]),
             self.quaternions.numpy()[active],
             sigmoid(self.opacity.numpy()[active]),
-            np.clip(self.sh0.numpy()[active], 0, 1),
+            np.clip(self.colors.numpy()[active], 0, 1),
         )
 
 
