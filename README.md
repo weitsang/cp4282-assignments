@@ -33,7 +33,6 @@ The repository contains a small Lego dataset under `data/lego/`:
 
 Shared support files include:
 
-- `vanilla_cpu_renderer.py`: compatibility import layer for `3dgs_renderer_cpu.py`
 - `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
 - `configs/`: starter YAML files for training runs
 
@@ -43,7 +42,7 @@ implementation is kept separately and is not included in this repository.
 ## Running checks
 
 ```bash
-python -m compileall src scripts vanilla_cpu_renderer.py trainable_gaussian.py
+python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py
 python scripts/check_setup.py
 ```
 

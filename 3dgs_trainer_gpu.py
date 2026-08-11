@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import importlib
 import json
 from time import perf_counter
 from pathlib import Path
-import sys
 
 import numpy as np
 from PIL import Image
@@ -23,11 +23,12 @@ import warp as wp
 from warp.optim import Adam
 import yaml
 
-# The reference CPU renderer belongs to the Assignment 1 solution, not this examples folder.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "a1-solution"))
-
 from trainable_gaussian import TrainableGaussianSet
-from vanilla_cpu_renderer import GaussianSet, SUPPORT_RADIUS_SQUARED, quaternion_to_matrix
+
+_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
+GaussianSet = _cpu_renderer.GaussianSet
+SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
+quaternion_to_matrix = _cpu_renderer.quaternion_to_matrix
 
 
 DEFAULT_RESOLUTION = 256

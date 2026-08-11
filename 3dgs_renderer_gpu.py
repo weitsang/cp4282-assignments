@@ -10,12 +10,16 @@ owns persistent screen-space arrays and launches one parallel work item per outp
 from __future__ import annotations
 
 import argparse
+import importlib
 
 import numpy as np
 from PIL import Image
 import warp as wp
 
-from vanilla_cpu_renderer import Camera, GaussianSet, project_gaussians
+_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
+Camera = _cpu_renderer.Camera
+GaussianSet = _cpu_renderer.GaussianSet
+project_gaussians = _cpu_renderer.project_gaussians
 
 
 @wp.kernel
@@ -32,7 +36,7 @@ def rasterize(
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
     
-    // TODO: Calculate the RGB at pixel (px, py)
+    # TODO: Calculate the RGB at pixel (px, py)
 
     image[pixel] = wp.vec3(0.0, 0.0, 0.0)
 
