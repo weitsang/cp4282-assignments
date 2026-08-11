@@ -22,14 +22,12 @@ The repository contains a small Lego dataset under `data/lego/`:
 - `test/` contains held-out images and `transforms_test.json`.
 - `init.ply` is a small starting point for the full-training assignment.
 
-## Assignments
+## Assignment 1
 
-1. `vanilla_cpu_renderer.py`: complete projection, Gaussian evaluation, and compositing.
-2. `warp_cpu_renderer.py`: move the pixel loop into Warp kernels.
-3. `assignments/unit8_synthetic_training.py`: implement the differentiable synthetic trainer.
-4. `assignments/unit9_image_training.py`: complete the image-based training loop in stages.
-5. `assignments/unit10_sh_training.py`: add view-dependent spherical-harmonic colour.
-6. `assignments/unit11_dssim_training.py`: add the scheduled D-SSIM objective.
+1. `3dgs_renderer_cpu.py`: calculate the RGB of a pixel in CPU
+2. `3dgs_renderer_gpu.py`: calculate the RGB of a pixel in GPU
+
+## Assignment 2
 
 Shared starter helpers include `trainable_gaussian.py` for trainable splat arrays and
 `dssim_metrics.py` for the Unit 11 image-space loss.
