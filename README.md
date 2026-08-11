@@ -29,15 +29,13 @@ The repository contains a small Lego dataset under `data/lego/`:
 
 ## Assignment 2
 
-Shared starter helpers include `trainable_gaussian.py` for trainable splat arrays and
-`dssim_metrics.py` for the Unit 11 image-space loss.
+`3dgs_trainer_gpu.py`: train a 3DGS model with the Warp renderer.
 
-The gradient-check starter is `scripts/gradient_check.py`; run it after implementing the Unit 9
-backward pass. The evaluation starter is `scripts/evaluate.py`; it is intended to report PSNR and
-SSIM on the held-out test views after a renderer or trainer produces a PLY.
+Shared support files include:
 
-Starter YAML files are in `configs/`. Change paths and resource settings only after the small CPU
-case works.
+- `vanilla_cpu_renderer.py`: compatibility import layer for `3dgs_renderer_cpu.py`
+- `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
+- `configs/`: starter YAML files for training runs
 
 Each file contains `TODO` markers and a small command-line interface. The instructor regression
 implementation is kept separately and is not included in this repository.
@@ -45,7 +43,7 @@ implementation is kept separately and is not included in this repository.
 ## Running checks
 
 ```bash
-python -m compileall src assignments scripts
+python -m compileall src scripts vanilla_cpu_renderer.py trainable_gaussian.py
 python scripts/check_setup.py
 ```
 
