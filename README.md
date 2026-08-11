@@ -41,13 +41,33 @@ Shared support files include:
 - `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
 - `configs/`: starter YAML files for training runs
 
+## Evaluating your output
+
+Use the evaluator scripts to compare a rendered PLY against either the training split or the held-out
+test split. They render every reference camera view, save the rendered images, and report PSNR,
+SSIM, and LPIPS.
+
+```bash
+python 3dgs_evaluator_cpu.py data/lego/init.ply data/lego/test \
+  --width 256 --height 256 --background white
+
+python 3dgs_evaluator_gpu.py data/lego/init.ply data/lego/test \
+  --width 256 --height 256 --background white --device cuda:0
+```
+
+The second argument is the reference image directory. For `data/lego/train` and `data/lego/test`,
+the matching `transforms_train.json` or `transforms_test.json` file is found automatically. For a
+different dataset layout, pass `--manifest path/to/transforms.json`.
+
+LPIPS uses PyTorch and downloads the selected network weights the first time it runs.
+
 Each file contains `TODO` markers and a small command-line interface. The instructor regression
 implementation is kept separately and is not included in this repository.
 
 ## Running checks
 
 ```bash
-python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py
+python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
 python scripts/check_setup.py
 ```
 
