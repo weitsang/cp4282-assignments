@@ -36,6 +36,10 @@ Annotated walkthroughs explain the provided skeleton code without showing the TO
 
 `3dgs_trainer_gpu.py`: train a 3DGS model with the Warp renderer.
 
+```bash
+python 3dgs_trainer_gpu.py configs/warp_3dgs_training.yaml
+```
+
 Shared support files include:
 
 - `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
