@@ -34,8 +34,9 @@ The repository contains a small Lego dataset under `data/lego/`:
 Shared starter helpers include `trainable_gaussian.py` for trainable splat arrays and
 `dssim_metrics.py` for the Unit 11 image-space loss.
 
-The evaluation starter is `scripts/evaluate.py`; it is intended to report PSNR and SSIM on the
-held-out test views after a renderer or trainer produces a PLY.
+The gradient-check starter is `scripts/gradient_check.py`; run it after implementing the Unit 9
+backward pass. The evaluation starter is `scripts/evaluate.py`; it is intended to report PSNR and
+SSIM on the held-out test views after a renderer or trainer produces a PLY.
 
 Starter YAML files are in `configs/`. Change paths and resource settings only after the small CPU
 case works.
