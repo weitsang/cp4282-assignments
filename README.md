@@ -77,5 +77,13 @@ python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_
 python scripts/check_setup.py
 ```
 
+After implementing `3dgs_trainer_gpu.py`'s backward pass (Unit 9), verify it with a finite-difference
+gradient check:
+
+```bash
+python scripts/gradient_check.py
+python scripts/gradient_check.py --device cuda:0
+```
+
 Use `--help` on each assignment for its command-line arguments. Start with low resolution and a
 small iteration count while debugging.

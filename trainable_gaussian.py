@@ -1,7 +1,7 @@
 """Warp storage and updates for trainable 3D Gaussian parameters.
 
 This module deliberately separates parameter storage from rendering. The class supports N splats,
-but Unit 9's renderer uses only one splat; Unit 10 adds the multi-splat renderer.
+but Unit 8's renderer uses only one splat; Unit 9 adds the multi-splat renderer.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ class TrainableGaussianSet:
         rng: np.random.Generator,
         device: wp.context.Device,
     ) -> "TrainableGaussianSet":
-        """Create the small random initialization used by Unit 9."""
+        """Create the small random initialization used by Unit 8."""
         means = rng.uniform(-0.45, 0.45, size=(count, 3)).astype(np.float32)
         means[:, 2] *= 0.3
         log_scales = np.tile(

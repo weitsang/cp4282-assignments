@@ -746,7 +746,7 @@ class TileWorkspace:
     Allocated once for the largest batch and pair count the trainer will ever request, then
     reused every step -- rebuilding these from scratch every iteration would dominate the time
     budget. The radix sort needs the second half of each key/value array as scratch space,
-    hence the factor of two on the pair-capacity buffers. See Unit 10, Stage 2.
+    hence the factor of two on the pair-capacity buffers. See Unit 9, Stage 2.
     """
 
     def __init__(self, capacity, max_views_per_batch, tiles_x, tile_pair_capacity, device):
@@ -943,7 +943,7 @@ class SplatOptimizers:
 
     def reset(self):
         """Clear all Adam moments after densify/prune changes which parameters exist. A clone
-        or split child needs fresh optimizer state -- see Unit 10, Stage 8."""
+        or split child needs fresh optimizer state -- see Unit 9, Stage 7."""
         for optimizer in self.optimizers:
             optimizer.reset_internal_state()
         self.quaternion_m.zero_()
@@ -1351,7 +1351,7 @@ class ConvergenceTracker:
 
     Only a true `eval_every` tick advances this state -- a snapshot-only iteration recomputes
     `fixed_eval` for logging and rendering, but must not affect when training stops, or
-    `snapshot_every` would silently reshape the stopping schedule. See Unit 10, Stage 10.
+    `snapshot_every` would silently reshape the stopping schedule. See Unit 9, Stage 9.
     """
 
     def __init__(self, config, initial_loss):

@@ -1,7 +1,7 @@
-"""Warp port of the Unit 5 parallel 3DGS raster stage.
+"""Warp port of the Unit 4 parallel 3DGS raster stage.
 
 Usage:
-    python warp_3dgs_renderer.py point_cloud.ply render.png --device cpu
+    python 3dgs_renderer_gpu.py point_cloud.ply render.png --device cpu
 
 Projection and global near-to-far ordering deliberately reuse the sequential reference. Warp
 owns persistent screen-space arrays and launches one parallel work item per output pixel.
