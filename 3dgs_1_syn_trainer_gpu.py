@@ -161,12 +161,13 @@ def alpha_at_pixel(
     px: float,
     py: float,
     width: float,
+    height: float,
     focal: float,
 ):
     point = camera * wp.vec4(mean[0], mean[1], mean[2], 1.0)
     z = wp.max(point[2], NEAR_PLANE)
     centre_x = focal * point[0] / z + 0.5 * width
-    centre_y = focal * point[1] / z + 0.5 * width
+    centre_y = focal * point[1] / z + 0.5 * height
     covariance = projected_covariance(log_scale, quaternion, camera, point[0], point[1], z, focal)
     determinant = wp.max(covariance[0] * covariance[2] - covariance[1] * covariance[1], 1.0e-8)
     conic = wp.vec3(covariance[2] / determinant, -covariance[1] / determinant, covariance[0] / determinant)
@@ -188,19 +189,20 @@ def render_loss(
     cameras: wp.array(dtype=wp.mat44),
     targets: wp.array(dtype=wp.vec3),
     width: int,
+    height: int,
     focal: float,
     image: wp.array(dtype=wp.vec3),
     loss: wp.array(dtype=wp.float32),
 ):
     thread = wp.tid()
-    pixels = width * width
+    pixels = width * height
     view = thread // pixels
     pixel = thread - view * pixels
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
     alpha = alpha_at_pixel(
         means[0], log_scales[0], quaternions[0], opacity_logits[0],
-        cameras[view], px, py, float(width), focal,
+        cameras[view], px, py, float(width), float(height), focal,
     )
     rgb = alpha * colors[0]
     image[thread] = rgb
@@ -239,7 +241,7 @@ class SyntheticTrainer:
                 inputs=[
                     self.trainable.means, self.trainable.log_scales, self.trainable.quaternions,
                     self.trainable.opacity_logits, self.trainable.colors, self.cameras, self.targets,
-                    WIDTH, FOCAL_LENGTH,
+                    WIDTH, HEIGHT, FOCAL_LENGTH,
                 ],
                 outputs=[self.image, self.loss],
                 device=self.device,

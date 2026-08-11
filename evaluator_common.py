@@ -41,6 +41,32 @@ def infer_manifest(reference_dir: Path, manifest: Path | None) -> Path:
     )
 
 
+def resolve_reference_image(
+    data_root: Path,
+    reference_dir: Path,
+    frame_path: str,
+) -> Path | None:
+    """Resolve a manifest frame to a PNG/JPG/JPEG image in the requested split."""
+    manifest_base = data_root / frame_path
+    split_base = reference_dir / Path(frame_path).name
+    candidates = []
+    for base in (manifest_base, split_base):
+        if base.suffix:
+            candidates.append(base)
+            candidates.extend(base.with_suffix(suffix) for suffix in (".png", ".jpg", ".jpeg"))
+        else:
+            candidates.extend(base.with_suffix(suffix) for suffix in (".png", ".jpg", ".jpeg"))
+    seen = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            return resolved
+    return None
+
+
 def blender_c2w_to_world_to_camera(transform_matrix: list[list[float]]) -> np.ndarray:
     """Convert a NeRF-synthetic Blender camera pose into this renderer's camera matrix."""
     camera_to_world = np.asarray(transform_matrix, dtype=np.float64)
@@ -79,13 +105,8 @@ def load_reference_views(
         frame_path = frame.get("file_path")
         if frame_path is None:
             continue
-        manifest_image = (data_root / f"{frame_path}.png").resolve()
-        split_image = (reference_dir / Path(frame_path).name).with_suffix(".png").resolve()
-        if manifest_image.exists() and manifest_image.parent == reference_dir:
-            image_path = manifest_image
-        elif split_image.exists():
-            image_path = split_image
-        else:
+        image_path = resolve_reference_image(data_root, reference_dir, frame_path)
+        if image_path is None:
             continue
 
         rgba = Image.open(image_path).convert("RGBA")
@@ -158,7 +179,7 @@ def evaluate_views(
         psnr = psnr_from_mse(mse)
         ssim = ssim_rgb(prediction, target)
         lpips_value = lpips_metric(prediction, target)
-        render_path = output_dir / name
+        render_path = output_dir / f"{Path(name).stem}.png"
         Image.fromarray(np.uint8(prediction * 255.0)).save(render_path)
         row = {
             "view": index,

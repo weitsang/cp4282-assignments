@@ -150,12 +150,13 @@ def render_multi_loss(
     orders: wp.array(dtype=wp.int32),
     targets: wp.array(dtype=wp.vec3),
     width: int,
+    height: int,
     focal: float,
     image: wp.array(dtype=wp.vec3),
     loss: wp.array(dtype=wp.float32),
 ):
     thread = wp.tid()
-    pixels = width * width
+    pixels = width * height
     view = thread // pixels
     pixel = thread - view * pixels
     px = float(pixel % width) + 0.5
@@ -167,7 +168,7 @@ def render_multi_loss(
         if active[splat] != 0:
             alpha = alpha_at_pixel(
                 means[splat], log_scales[splat], quaternions[splat], opacity_logits[splat],
-                cameras[view], px, py, float(width), focal,
+                cameras[view], px, py, float(width), float(height), focal,
             )
             colour = colour + transmittance * alpha * colors[splat]
             transmittance = transmittance * (1.0 - alpha)
@@ -207,7 +208,7 @@ class MultiGaussianTrainer:
                     self.trainable.quaternions, self.trainable.opacity_logits,
                     self.trainable.colors, self.active_device,
                     self.cameras, self.orders, self.targets,
-                    WIDTH, FOCAL_LENGTH,
+                    WIDTH, HEIGHT, FOCAL_LENGTH,
                 ],
                 outputs=[self.image, self.loss],
                 device=self.device,
