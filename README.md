@@ -27,6 +27,11 @@ The repository contains a small Lego dataset under `data/lego/`:
 1. `3dgs_renderer_cpu.py`: calculate the RGB of a pixel in CPU
 2. `3dgs_renderer_gpu.py`: calculate the RGB of a pixel in GPU
 
+Annotated walkthroughs explain the provided skeleton code without showing the TODO solution:
+
+- `3dgs_renderer_cpu_annotated.md`
+- `3dgs_renderer_gpu_annotated.md`
+
 ## Assignment 2
 
 `3dgs_trainer_gpu.py`: train a 3DGS model with the Warp renderer.
