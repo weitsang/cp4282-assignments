@@ -1,7 +1,7 @@
 """Warp port of the Unit 5 parallel 3DGS raster stage.
 
 Usage:
-    python warp_3dgs_renderer.py point_cloud.ply render.png --device cpu
+    python 3dgs_renderer_v2.py point_cloud.ply render.png --device cpu
 
 Projection and global near-to-far ordering deliberately reuse the sequential reference. Warp
 owns persistent screen-space arrays and launches one parallel work item per output pixel.
@@ -20,6 +20,9 @@ _cpu_renderer = importlib.import_module("3dgs_renderer_v1")
 Camera = _cpu_renderer.Camera
 GaussianSet = _cpu_renderer.GaussianSet
 project_gaussians = _cpu_renderer.project_gaussians
+SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
+ALPHA_CUTOFF = 1.0 / 255.0
+TRANSMITTANCE_CUTOFF = 1.0e-4
 
 
 @wp.kernel
@@ -28,6 +31,7 @@ def rasterize(
     conics: wp.array(dtype=wp.vec3),
     colours: wp.array(dtype=wp.vec3),
     opacities: wp.array(dtype=wp.float32),
+    supports: wp.array(dtype=wp.float32),
     count: int,
     width: int,
     image: wp.array(dtype=wp.vec3),
@@ -51,6 +55,7 @@ class WarpRenderer:
         self.conics = wp.zeros(maximum_splats, dtype=wp.vec3, device=self.device)
         self.colours = wp.zeros(maximum_splats, dtype=wp.vec3, device=self.device)
         self.opacities = wp.zeros(maximum_splats, dtype=wp.float32, device=self.device)
+        self.supports = wp.zeros(maximum_splats, dtype=wp.float32, device=self.device)
         self.image = wp.zeros(width * height, dtype=wp.vec3, device=self.device)
 
     def render(self, splats: GaussianSet, camera: Camera) -> np.ndarray:
@@ -62,8 +67,15 @@ class WarpRenderer:
         self.conics.assign(wp.array(projected.conics, dtype=wp.vec3, device=self.device))
         self.colours.assign(wp.array(projected.colors, dtype=wp.vec3, device=self.device))
         self.opacities.assign(wp.array(projected.opacities, dtype=wp.float32, device=self.device))
+        supports = np.zeros(count, dtype=np.float32)
+        active = projected.opacities > ALPHA_CUTOFF
+        supports[active] = np.minimum(
+            SUPPORT_RADIUS_SQUARED,
+            2.0 * np.log(projected.opacities[active] / ALPHA_CUTOFF),
+        )
+        self.supports.assign(wp.array(supports, dtype=wp.float32, device=self.device))
         wp.launch(rasterize, dim=self.width * self.height,
-                  inputs=[self.centres, self.conics, self.colours, self.opacities, count, self.width, self.image],
+                  inputs=[self.centres, self.conics, self.colours, self.opacities, self.supports, count, self.width, self.image],
                   device=self.device)
         return self.image.numpy().reshape(self.height, self.width, 3)
 
