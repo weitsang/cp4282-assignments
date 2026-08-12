@@ -1,4 +1,4 @@
-"""Warp port of the Unit 5 parallel 3DGS raster stage.
+"""Warp port of the Unit 4 parallel 3DGS raster stage.
 
 Usage:
     python 3dgs_renderer_v2.py point_cloud.ply render.png --device cpu

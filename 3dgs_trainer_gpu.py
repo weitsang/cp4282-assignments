@@ -1,7 +1,7 @@
 """Train anisotropic 3D Gaussian splats from NeRF-synthetic posed images with Warp.
 
 Usage:
-    python warp_images_3dgs_training.py training.yaml
+    python 3dgs_trainer_gpu.py config/3dgs_training_gpu.yaml
 
 The data directory contains transforms_train.json and its RGBA image files. Warp owns the
 parallel raster, explicit backward pass, and Adam updates. Python owns image loading, camera
@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import importlib
 import json
 from time import perf_counter
 from pathlib import Path
-import sys
 
 import numpy as np
 from PIL import Image
@@ -23,11 +23,12 @@ import warp as wp
 from warp.optim import Adam
 import yaml
 
-# The reference CPU renderer belongs to the Assignment 1 solution, not this examples folder.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "a1-solution"))
-
 from trainable_gaussian import TrainableGaussianSet
-from vanilla_cpu_renderer import GaussianSet, SUPPORT_RADIUS_SQUARED, quaternion_to_matrix
+
+_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
+GaussianSet = _cpu_renderer.GaussianSet
+SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
+quaternion_to_matrix = _cpu_renderer.quaternion_to_matrix
 
 
 DEFAULT_RESOLUTION = 256
@@ -77,6 +78,8 @@ class TrainingConfig:
         },
         "model": {
             "resolution": DEFAULT_RESOLUTION,
+            "width": None,
+            "height": None,
             "capacity": DEFAULT_SPLATS,
             "initial_splats": DEFAULT_INITIAL_SPLATS,
             "tile_pair_capacity": None,
@@ -166,6 +169,7 @@ class TrainingConfig:
             if not resolved.is_absolute():
                 resolved = config_path.parent / resolved
             config.values["paths"][key] = resolved.resolve()
+        config.values["paths"]["output"] = config.values["paths"]["output"].with_suffix(".png")
         config.validate()
         return config
 
@@ -206,8 +210,13 @@ class TrainingConfig:
                 raise ValueError(f"paths.{name} cannot be null.")
         if model["background"] not in ("white", "black"):
             raise ValueError("model.background must be 'white' or 'black'.")
+        for dimension in ("width", "height"):
+            if model[dimension] is None:
+                model[dimension] = model["resolution"]
         for name, value in (
             ("model.resolution", model["resolution"]),
+            ("model.width", model["width"]),
+            ("model.height", model["height"]),
             ("model.capacity", model["capacity"]),
             ("model.initial_splats", model["initial_splats"]),
             ("training.iterations", training["iterations"]),
@@ -371,13 +380,29 @@ def projected_covariance_diagonal(
     return variance_x, variance_y
 
 
-def load_views(data: Path, resolution: int, background: np.ndarray, manifest_name: str = "transforms_train.json"):
+def resolve_frame_image(data: Path, frame_path: str) -> Path:
+    """Resolve a NeRF-synthetic frame path that may point to PNG, JPG, or JPEG."""
+    base = data / frame_path
+    candidates = []
+    if base.suffix:
+        candidates.append(base)
+        candidates.extend(base.with_suffix(suffix) for suffix in (".png", ".jpg", ".jpeg"))
+    else:
+        candidates.extend(base.with_suffix(suffix) for suffix in (".png", ".jpg", ".jpeg"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    tried = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"Could not find image for frame '{frame_path}'. Tried: {tried}")
+
+
+def load_views(data: Path, width: int, height: int, background: np.ndarray, manifest_name: str = "transforms_train.json"):
     manifest = json.loads((data / manifest_name).read_text())
-    focal = np.float32(0.5 * resolution / np.tan(0.5 * manifest["camera_angle_x"]))
+    focal = np.float32(0.5 * width / np.tan(0.5 * manifest["camera_angle_x"]))
     images, cameras, distances, frame_paths = [], [], [], []
     for frame in manifest["frames"]:
-        image = Image.open(data / f"{frame['file_path']}.png").convert("RGBA")
-        rgba = np.asarray(image.resize((resolution, resolution), Image.LANCZOS), np.float32) / 255.0
+        image = Image.open(resolve_frame_image(data, frame["file_path"])).convert("RGBA")
+        rgba = np.asarray(image.resize((width, height), Image.LANCZOS), np.float32) / 255.0
         alpha = rgba[..., 3:4]
         images.append(rgba[..., :3] * alpha + (1.0 - alpha) * background)
         cameras.append(blender_pose_to_world_to_camera(frame["transform_matrix"]))
@@ -439,7 +464,9 @@ def project_and_count_tile_pairs(
     view_ids: wp.array(dtype=wp.int32),
     capacity: int,
     width: int,
+    height: int,
     tiles_x: int,
+    tiles_y: int,
     tile: int,
     focal: float,
     view_count: int,
@@ -478,7 +505,7 @@ def project_and_count_tile_pairs(
                 radius_x = radius_scale * wp.sqrt(wp.max(covariance[0], 0.0))
                 radius_y = radius_scale * wp.sqrt(wp.max(covariance[2], 0.0))
                 centre_x = focal * point[0] / z + 0.5 * float(width)
-                centre_y = focal * point[1] / z + 0.5 * float(width)
+                centre_y = focal * point[1] / z + 0.5 * float(height)
                 if (
                     wp.isfinite(centre_x)
                     and wp.isfinite(centre_y)
@@ -489,11 +516,11 @@ def project_and_count_tile_pairs(
                     max_x = int(wp.floor((centre_x + radius_x) / float(tile)))
                     min_y = int(wp.floor((centre_y - radius_y) / float(tile)))
                     max_y = int(wp.floor((centre_y + radius_y) / float(tile)))
-                    if max_x >= 0 and max_y >= 0 and min_x < tiles_x and min_y < tiles_x:
+                    if max_x >= 0 and max_y >= 0 and min_x < tiles_x and min_y < tiles_y:
                         min_x = wp.max(min_x, 0)
                         max_x = wp.min(max_x, tiles_x - 1)
                         min_y = wp.max(min_y, 0)
-                        max_y = wp.min(max_y, tiles_x - 1)
+                        max_y = wp.min(max_y, tiles_y - 1)
                         tile_bounds[thread] = wp.vec4i(min_x, max_x, min_y, max_y)
                         depths[thread] = z
                         pair_counts[thread] = (max_x - min_x + 1) * (max_y - min_y + 1)
@@ -565,12 +592,13 @@ def alpha_at_pixel(
     px: float,
     py: float,
     width: float,
+    height: float,
     focal: float,
 ):
     point = camera * wp.vec4(mean[0], mean[1], mean[2], 1.0)
     z = wp.max(point[2], NEAR_PLANE)
     centre_x = focal * point[0] / z + 0.5 * width
-    centre_y = focal * point[1] / z + 0.5 * width
+    centre_y = focal * point[1] / z + 0.5 * height
     conic = conic_at_centre(log_scale, quaternion, camera, point[0], point[1], z, focal)
     dx, dy = px - centre_x, py - centre_y
     q = conic[0] * dx * dx + 2.0 * conic[1] * dx * dy + conic[2] * dy * dy
@@ -584,12 +612,12 @@ def alpha_at_pixel(
 
 @wp.func
 def colour_at_view(
-    sh0: wp.vec3,
+    colors: wp.vec3,
 ):
     return wp.vec3(
-        wp.clamp(sh0[0], 0.0, 1.0),
-        wp.clamp(sh0[1], 0.0, 1.0),
-        wp.clamp(sh0[2], 0.0, 1.0),
+        wp.clamp(colors[0], 0.0, 1.0),
+        wp.clamp(colors[1], 0.0, 1.0),
+        wp.clamp(colors[2], 0.0, 1.0),
     )
 
 
@@ -599,14 +627,16 @@ def render_forward(
     log_scales: wp.array(dtype=wp.vec3),
     quaternions: wp.array(dtype=wp.vec4),
     opacity_logits: wp.array(dtype=wp.float32),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     cameras: wp.array(dtype=wp.mat44),
     targets: wp.array(dtype=wp.vec3),
     view_ids: wp.array(dtype=wp.int32),
     offsets: wp.array(dtype=wp.int32),
     pairs: wp.array(dtype=wp.uint64),
     width: int,
+    height: int,
     tiles_x: int,
+    tiles_y: int,
     tile: int,
     focal: float,
     view_count: int,
@@ -615,22 +645,22 @@ def render_forward(
     loss: wp.array(dtype=wp.float32),
 ):
     thread = wp.tid()
-    pixels = width * width
+    pixels = width * height
     batch_view = thread // pixels
     view = view_ids[batch_view]
     pixel = thread - batch_view * pixels
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
-    record = batch_view * tiles_x * tiles_x + (pixel // width // tile) * tiles_x + (pixel % width // tile)
+    record = batch_view * tiles_x * tiles_y + (pixel // width // tile) * tiles_x + (pixel % width // tile)
     rgb = wp.vec3(0.0, 0.0, 0.0)
     transmittance = float(1.0)
     for entry in range(offsets[record], offsets[record + 1]):
         splat = int(pairs[entry] & wp.uint64(0xFFFFFFFF))
         alpha = alpha_at_pixel(means[splat], log_scales[splat], quaternions[splat],
                                opacity_logits[splat], cameras[view], px, py,
-                               float(width), focal)
+                               float(width), float(height), focal)
         if alpha > 0.0:
-            colour = colour_at_view(sh0[splat])
+            colour = colour_at_view(colors[splat])
             rgb = rgb + transmittance * alpha * colour
             transmittance = transmittance * (1.0 - alpha)
             if transmittance < TRANSMITTANCE_CUTOFF:
@@ -647,14 +677,16 @@ def render_backward(
     log_scales: wp.array(dtype=wp.vec3),
     quaternions: wp.array(dtype=wp.vec4),
     opacity_logits: wp.array(dtype=wp.float32),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     cameras: wp.array(dtype=wp.mat44),
     targets: wp.array(dtype=wp.vec3),
     view_ids: wp.array(dtype=wp.int32),
     offsets: wp.array(dtype=wp.int32),
     pairs: wp.array(dtype=wp.uint64),
     width: int,
+    height: int,
     tiles_x: int,
+    tiles_y: int,
     tile: int,
     focal: float,
     view_count: int,
@@ -663,16 +695,16 @@ def render_backward(
     scale_grad_flat: wp.array(dtype=wp.float32),
     quaternion_grad_flat: wp.array(dtype=wp.float32),
     opacity_grad: wp.array(dtype=wp.float32),
-    sh0_grad_flat: wp.array(dtype=wp.float32),
+    color_grad_flat: wp.array(dtype=wp.float32),
 ):
     thread = wp.tid()
-    pixels = width * width
+    pixels = width * height
     batch_view = thread // pixels
     view = view_ids[batch_view]
     pixel = thread - batch_view * pixels
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
-    record = batch_view * tiles_x * tiles_x + (pixel // width // tile) * tiles_x + (pixel % width // tile)
+    record = batch_view * tiles_x * tiles_y + (pixel // width // tile) * tiles_x + (pixel % width // tile)
 
     # This is an explicit adjoint of front-to-back compositing. It is an ordinary forward
     # execution of a runtime loop, so Warp never has to reverse a variable-length loop.
@@ -720,7 +752,7 @@ def adam_quaternion_step(
 @wp.kernel
 def constrain_parameters(
     log_scales: wp.array(dtype=wp.vec3),
-    sh0: wp.array(dtype=wp.vec3),
+    colors: wp.array(dtype=wp.vec3),
     minimum_log_scale: float,
     maximum_log_scale: float,
 ):
@@ -731,8 +763,8 @@ def constrain_parameters(
         wp.clamp(scale[1], minimum_log_scale, maximum_log_scale),
         wp.clamp(scale[2], minimum_log_scale, maximum_log_scale),
     )
-    colour = sh0[i]
-    sh0[i] = wp.vec3(
+    colour = colors[i]
+    colors[i] = wp.vec3(
         wp.clamp(colour[0], 0.0, 1.0),
         wp.clamp(colour[1], 0.0, 1.0),
         wp.clamp(colour[2], 0.0, 1.0),
@@ -745,14 +777,15 @@ class TileWorkspace:
     Allocated once for the largest batch and pair count the trainer will ever request, then
     reused every step -- rebuilding these from scratch every iteration would dominate the time
     budget. The radix sort needs the second half of each key/value array as scratch space,
-    hence the factor of two on the pair-capacity buffers. See Unit 10, Stage 2.
+    hence the factor of two on the pair-capacity buffers. See Unit 9, Stage 2.
     """
 
-    def __init__(self, capacity, max_views_per_batch, tiles_x, tile_pair_capacity, device):
+    def __init__(self, capacity, max_views_per_batch, tiles_x, tiles_y, tile_pair_capacity, device):
         self.capacity = capacity
         self.max_views_per_batch = max_views_per_batch
         self.tiles_x = tiles_x
-        self.tiles_per_view = tiles_x * tiles_x
+        self.tiles_y = tiles_y
+        self.tiles_per_view = tiles_x * tiles_y
         self.tile_pair_capacity = tile_pair_capacity
         self.device = device
 
@@ -772,7 +805,7 @@ class TileWorkspace:
         self.view_ids = wp.zeros(max_views_per_batch, dtype=wp.int32, device=device)
 
     def build(self, means, log_scales, quaternions, opacity, active_device, cameras,
-              view_ids, width, focal, compact_box):
+              view_ids, width, height, focal, compact_box):
         """Build compact, depth-ordered tile records for `view_ids`.
 
         Returns (offsets, packed_pairs, pair_count): `offsets[r]` and `offsets[r + 1]` give the
@@ -796,7 +829,8 @@ class TileWorkspace:
             inputs=[
                 means, log_scales, quaternions, opacity,
                 active_device,
-                cameras, self.view_ids, self.capacity, width, self.tiles_x,
+                cameras, self.view_ids, self.capacity, width, height,
+                self.tiles_x, self.tiles_y,
                 TILE, focal, view_count,
                 int(compact_box["enabled"]),
                 float(compact_box["beta"]),
@@ -888,12 +922,12 @@ class SplatOptimizers:
         self.mean_optimizer = Adam([trainable.means], lr=learning_rates["position_initial"])
         self.scale_optimizer = Adam([trainable.log_scales], lr=learning_rates["scale"])
         self.opacity_optimizer = Adam([trainable.opacity_logits], lr=learning_rates["opacity"])
-        self.sh0_optimizer = Adam([trainable.colors], lr=learning_rates["feature_dc"])
+        self.color_optimizer = Adam([trainable.colors], lr=learning_rates["feature_dc"])
         self.optimizers = (
             self.mean_optimizer,
             self.scale_optimizer,
             self.opacity_optimizer,
-            self.sh0_optimizer,
+            self.color_optimizer,
         )
         self.quaternion_m = wp.zeros(capacity, dtype=wp.vec4, device=device)
         self.quaternion_v = wp.zeros(capacity, dtype=wp.vec4, device=device)
@@ -903,14 +937,14 @@ class SplatOptimizers:
         self.scale_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
         self.quaternion_grad_flat = wp.zeros(capacity * 4, dtype=wp.float32, device=device)
         self.opacity_grad = wp.zeros(capacity, dtype=wp.float32, device=device)
-        self.sh0_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
+        self.color_grad_flat = wp.zeros(capacity * 3, dtype=wp.float32, device=device)
         self.mean_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
         self.scale_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
-        self.sh0_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
+        self.color_grad = wp.zeros(capacity, dtype=wp.vec3, device=device)
 
     def zero_gradients(self):
         for gradient in (self.mean_grad_flat, self.scale_grad_flat, self.quaternion_grad_flat,
-                         self.opacity_grad, self.sh0_grad_flat):
+                         self.opacity_grad, self.color_grad_flat):
             gradient.zero_()
 
     def pack_gradients(self, capacity):
@@ -918,7 +952,7 @@ class SplatOptimizers:
         vec3 arrays, for use as Adam inputs and as the densification statistic."""
         for flat, packed in ((self.mean_grad_flat, self.mean_grad),
                              (self.scale_grad_flat, self.scale_grad),
-                             (self.sh0_grad_flat, self.sh0_grad)):
+                             (self.color_grad_flat, self.color_grad)):
             wp.launch(pack_vec3_gradient, dim=capacity, inputs=[flat], outputs=[packed],
                       device=self.device)
 
@@ -928,7 +962,7 @@ class SplatOptimizers:
         self.mean_optimizer.step([self.mean_grad])
         self.scale_optimizer.step([self.scale_grad])
         self.opacity_optimizer.step([self.opacity_grad])
-        self.sh0_optimizer.step([self.sh0_grad])
+        self.color_optimizer.step([self.color_grad])
         wp.launch(
             adam_quaternion_step,
             dim=capacity,
@@ -942,7 +976,7 @@ class SplatOptimizers:
 
     def reset(self):
         """Clear all Adam moments after densify/prune changes which parameters exist. A clone
-        or split child needs fresh optimizer state -- see Unit 10, Stage 8."""
+        or split child needs fresh optimizer state -- see Unit 9, Stage 7."""
         for optimizer in self.optimizers:
             optimizer.reset_internal_state()
         self.quaternion_m.zero_()
@@ -961,7 +995,8 @@ class WarpImageTrainer:
                  device, seed, init_scene=None, background=(1.0, 1.0, 1.0),
                  learning_rates=None, tile_pair_capacity=None, training_options=None):
         self.focal = float(focal)
-        self.width, self.capacity, self.device = targets.shape[1], capacity, wp.get_device(device)
+        self.height, self.width = targets.shape[1], targets.shape[2]
+        self.capacity, self.device = capacity, wp.get_device(device)
         # Training always uses one randomly selected camera. Evaluation also renders one camera
         # at a time, so every image buffer can have a simple, fixed batch dimension of one.
         self.max_views_per_batch = 1
@@ -978,7 +1013,8 @@ class WarpImageTrainer:
         self.last_position_learning_rate = self.learning_rates["position_initial"]
         self.background = wp.vec3(float(background[0]), float(background[1]), float(background[2]))
         self.tiles_x = (self.width + TILE - 1) // TILE
-        self.tiles_per_view = self.tiles_x * self.tiles_x
+        self.tiles_y = (self.height + TILE - 1) // TILE
+        self.tiles_per_view = self.tiles_x * self.tiles_y
         self.tile_pair_capacity = int(
             tile_pair_capacity
             if tile_pair_capacity is not None
@@ -1022,21 +1058,22 @@ class WarpImageTrainer:
         self.log_scales = self.trainable.log_scales
         self.quaternions = self.trainable.quaternions
         self.opacity = self.trainable.opacity_logits
-        self.sh0 = self.trainable.colors
+        self.colors = self.trainable.colors
 
     def _init_buffers(self, cameras, targets, capacity):
         """Allocate camera/target uploads, the tile workspace, optimizers, and render buffers."""
         self.cameras = wp.array(cameras, dtype=wp.mat44, device=self.device)
         self.targets = wp.array(targets.reshape(-1, 3), dtype=wp.vec3, device=self.device)
         self.tiles = TileWorkspace(
-            capacity, self.max_views_per_batch, self.tiles_x, self.tile_pair_capacity, self.device,
+            capacity, self.max_views_per_batch, self.tiles_x, self.tiles_y,
+            self.tile_pair_capacity, self.device,
         )
         self.optimizers = SplatOptimizers(
             self.trainable, capacity, self.learning_rates, self.device,
         )
         self.last_pair_count = 0
         self.image = wp.empty(
-            self.max_views_per_batch * self.width * self.width,
+            self.max_views_per_batch * self.width * self.height,
             dtype=wp.vec3,
             device=self.device,
         )
@@ -1047,7 +1084,8 @@ class WarpImageTrainer:
         """Build compact, depth-ordered tile records on the selected Warp device."""
         return self.tiles.build(
             self.means, self.log_scales, self.quaternions, self.opacity, self.active_device,
-            self.cameras, view_ids, self.width, self.focal, self.training_options["compact_box"],
+            self.cameras, view_ids, self.width, self.height,
+            self.focal, self.training_options["compact_box"],
         )
 
     def loss_and_gradients(self, view_ids):
@@ -1062,24 +1100,24 @@ class WarpImageTrainer:
         self.optimizers.zero_gradients()
         wp.launch(
             render_forward,
-            dim=len(view_ids) * self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            dim=len(view_ids) * self.width * self.height,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
-                    self.width, self.tiles_x,
+                    self.width, self.height, self.tiles_x, self.tiles_y,
                     TILE, self.focal, len(view_ids), self.background],
             outputs=[self.image, self.loss],
             device=self.device,
         )
         wp.launch(
             render_backward,
-            dim=len(view_ids) * self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            dim=len(view_ids) * self.width * self.height,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
-                    self.width, self.tiles_x,
+                    self.width, self.height, self.tiles_x, self.tiles_y,
                     TILE, self.focal, len(view_ids), self.image],
             outputs=[self.optimizers.mean_grad_flat, self.optimizers.scale_grad_flat,
                      self.optimizers.quaternion_grad_flat, self.optimizers.opacity_grad,
-                     self.optimizers.sh0_grad_flat],
+                     self.optimizers.color_grad_flat],
             device=self.device,
         )
         self.optimizers.pack_gradients(self.capacity)
@@ -1101,10 +1139,10 @@ class WarpImageTrainer:
             self.loss.zero_()
             wp.launch(
                 render_forward,
-                dim=self.width * self.width,
-                inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+                dim=self.width * self.height,
+                inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                         self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
-                        self.width, self.tiles_x, TILE, self.focal, 1,
+                        self.width, self.height, self.tiles_x, self.tiles_y, TILE, self.focal, 1,
                         self.background],
                 outputs=[self.image, self.loss],
                 device=self.device,
@@ -1117,16 +1155,16 @@ class WarpImageTrainer:
         self.loss.zero_()
         wp.launch(
             render_forward,
-            dim=self.width * self.width,
-            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.sh0,
+            dim=self.width * self.height,
+            inputs=[self.means, self.log_scales, self.quaternions, self.opacity, self.colors,
                     self.cameras, self.targets, self.tiles.view_ids, offsets, pairs,
-                    self.width, self.tiles_x, TILE, self.focal, 1,
+                    self.width, self.height, self.tiles_x, self.tiles_y, TILE, self.focal, 1,
                     self.background],
             outputs=[self.image, self.loss],
             device=self.device,
         )
         return (
-            self.image.numpy()[: self.width * self.width].reshape(self.width, self.width, 3),
+            self.image.numpy()[: self.width * self.height].reshape(self.height, self.width, 3),
             float(self.loss.numpy()[0]),
         )
 
@@ -1141,7 +1179,7 @@ class WarpImageTrainer:
         scales = np.exp(self.log_scales.numpy()[candidate_indices])
         quaternions = self.quaternions.numpy()[candidate_indices]
         cameras = self.cameras.numpy()
-        targets = self.targets.numpy().reshape(-1, self.width, self.width, 3)
+        targets = self.targets.numpy().reshape(-1, self.height, self.width, 3)
         compact = self.training_options["compact_box"]
         opacity = sigmoid(self.opacity.numpy()[candidate_indices])
         support = np.full(len(candidate_indices), 9.0, np.float32)
@@ -1176,20 +1214,20 @@ class WarpImageTrainer:
             )
             centres = np.empty((int(np.count_nonzero(visible)), 2), np.float32)
             centres[:, 0] = self.focal * camera_points[visible, 0] / camera_points[visible, 2] + 0.5 * self.width
-            centres[:, 1] = self.focal * camera_points[visible, 1] / camera_points[visible, 2] + 0.5 * self.width
+            centres[:, 1] = self.focal * camera_points[visible, 1] / camera_points[visible, 2] + 0.5 * self.height
             radius_scale = np.sqrt(support[visible])
             min_x = np.floor(centres[:, 0] - radius_scale * np.sqrt(np.maximum(variance_x, 0.0))).astype(np.int32)
             max_x = np.floor(centres[:, 0] + radius_scale * np.sqrt(np.maximum(variance_x, 0.0))).astype(np.int32)
             min_y = np.floor(centres[:, 1] - radius_scale * np.sqrt(np.maximum(variance_y, 0.0))).astype(np.int32)
             max_y = np.floor(centres[:, 1] + radius_scale * np.sqrt(np.maximum(variance_y, 0.0))).astype(np.int32)
-            in_image = (max_x >= 0) & (max_y >= 0) & (min_x < self.width) & (min_y < self.width)
+            in_image = (max_x >= 0) & (max_y >= 0) & (min_x < self.width) & (min_y < self.height)
             visible_indices = np.flatnonzero(visible)
             for local, x0, x1, y0, y1 in zip(
                 visible_indices[in_image],
                 np.clip(min_x[in_image], 0, self.width - 1),
                 np.clip(max_x[in_image], 0, self.width - 1),
-                np.clip(min_y[in_image], 0, self.width - 1),
-                np.clip(max_y[in_image], 0, self.width - 1),
+                np.clip(min_y[in_image], 0, self.height - 1),
+                np.clip(max_y[in_image], 0, self.height - 1),
             ):
                 total = high_error_integral[y1, x1]
                 if x0 > 0:
@@ -1240,7 +1278,7 @@ class WarpImageTrainer:
             constrain_parameters,
             dim=self.capacity,
             inputs=[
-                self.log_scales, self.sh0,
+                self.log_scales, self.colors,
                 np.log(self.scene_radius * SCALE_CLAMP_MIN_FRACTION),
                 np.log(self.scene_radius * SCALE_CLAMP_MAX_FRACTION),
             ],
@@ -1271,7 +1309,7 @@ class WarpImageTrainer:
         opacity = sigmoid(self.opacity.numpy())
         means, log_scales = self.means.numpy(), self.log_scales.numpy()
         quaternions, opacity_logits = self.quaternions.numpy(), self.opacity.numpy()
-        sh0 = self.sh0.numpy()
+        colors = self.colors.numpy()
         adc = self.training_options["multiview_adc"]
         prune_mask = (opacity < PRUNE_OPACITY_FLOOR) & self.active
         scores = np.linalg.norm(gradients, axis=1)
@@ -1322,14 +1360,14 @@ class WarpImageTrainer:
                 log_scales[child] = log_scales[parent]
             quaternions[child] = quaternions[parent]
             opacity_logits[child] = opacity_logits[parent]
-            sh0[child] = sh0[parent]
+            colors[child] = colors[parent]
         self.active_device.assign(self.active.astype(np.int32))
         for array, values, dtype in (
             (self.means, means, wp.vec3),
             (self.log_scales, log_scales, wp.vec3),
             (self.quaternions, quaternions, wp.vec4),
             (self.opacity, opacity_logits, wp.float32),
-            (self.sh0, sh0, wp.vec3),
+            (self.colors, colors, wp.vec3),
         ):
             array.assign(wp.array(values.astype(np.float32), dtype=dtype, device=self.device))
         self.optimizers.reset()
@@ -1341,7 +1379,7 @@ class WarpImageTrainer:
             np.exp(self.log_scales.numpy()[active]),
             self.quaternions.numpy()[active],
             sigmoid(self.opacity.numpy()[active]),
-            np.clip(self.sh0.numpy()[active], 0, 1),
+            np.clip(self.colors.numpy()[active], 0, 1),
         )
 
 
@@ -1350,7 +1388,7 @@ class ConvergenceTracker:
 
     Only a true `eval_every` tick advances this state -- a snapshot-only iteration recomputes
     `fixed_eval` for logging and rendering, but must not affect when training stops, or
-    `snapshot_every` would silently reshape the stopping schedule. See Unit 10, Stage 10.
+    `snapshot_every` would silently reshape the stopping schedule. See Unit 9, Stage 9.
     """
 
     def __init__(self, config, initial_loss):
@@ -1379,10 +1417,19 @@ class ConvergenceTracker:
         )
 
 
-def save_rendered_image(trainer: WarpImageTrainer, resolution: int, path: Path) -> None:
+def png_output_path(path: Path) -> Path:
+    """Return the path used for rendered output; rendered images are always PNG."""
+    return path if path.suffix.lower() == ".png" else path.with_suffix(".png")
+
+
+def save_rendered_image(trainer: WarpImageTrainer, path: Path) -> Path:
     """Save the trainer's most recently rendered image (its first buffered view) as a PNG."""
-    pixels = trainer.image.numpy()[: resolution * resolution].reshape(resolution, resolution, 3)
+    path = png_output_path(path)
+    pixels = trainer.image.numpy()[: trainer.width * trainer.height].reshape(
+        trainer.height, trainer.width, 3
+    )
     Image.fromarray(np.uint8(np.clip(pixels, 0.0, 1.0) * 255.0)).save(path)
+    return path
 
 
 def main() -> None:
@@ -1415,7 +1462,7 @@ def main() -> None:
         else np.zeros(3, np.float32)
     )
     targets, cameras, focal, distance, _ = load_views(
-        paths["data"], model["resolution"], background
+        paths["data"], model["width"], model["height"], background
     )
     scene_radius = model["scene_radius"] or distance * 0.35
     initial = GaussianSet.from_ply(paths["init_ply"]) if paths["init_ply"] else None
@@ -1438,7 +1485,7 @@ def main() -> None:
             "multiview_adc": adc,
         },
     )
-    output = paths["output"]
+    output = png_output_path(paths["output"])
     snapshots = Path(f"{output.with_suffix('')}_snapshots")
     snapshots.mkdir(parents=True, exist_ok=True)
     run_training(trainer, config, targets, eval_view_ids, snapshots, output)
@@ -1476,7 +1523,7 @@ def run_training(trainer, config, targets, eval_view_ids, snapshots, output) -> 
     )
     print(
         f"Training {trainer.active.sum():,} initial splats (capacity {model['capacity']:,}) at "
-        f"{model['resolution']}x{model['resolution']} on Warp {device}; "
+        f"{model['width']}x{model['height']} on Warp {device}; "
         "one random training view per iteration, "
         f"tile_pair_capacity={trainer.tile_pair_capacity:,}, "
         f"densify_every={densification['interval']} until {densify_until}. "
@@ -1572,7 +1619,7 @@ def run_training(trainer, config, targets, eval_view_ids, snapshots, output) -> 
                 flush=True,
             )
         if should_snapshot:
-            save_rendered_image(trainer, model["resolution"], snapshots / f"out_{iteration:06d}.png")
+            save_rendered_image(trainer, snapshots / f"out_{iteration:06d}.png")
             if reporting["save_ply"]:
                 trainer.gaussian_set().to_ply(snapshots / f"out_{iteration:06d}.ply")
         if convergence_tracker.should_stop(iteration):
@@ -1584,7 +1631,7 @@ def run_training(trainer, config, targets, eval_view_ids, snapshots, output) -> 
             )
             break
     trainer.evaluate(eval_view_ids)
-    save_rendered_image(trainer, model["resolution"], output)
+    output = save_rendered_image(trainer, output)
     if reporting["save_ply"]:
         final_ply = output.with_suffix(".ply")
         trainer.gaussian_set().to_ply(final_ply)
