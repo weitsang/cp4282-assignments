@@ -24,13 +24,16 @@ The repository contains a small Lego dataset under `data/lego/`:
 
 ## Assignment 1
 
-1. `3dgs_renderer_cpu.py`: calculate the RGB of a pixel in CPU
-2. `3dgs_renderer_gpu.py`: calculate the RGB of a pixel in GPU
+1. `3dgs_renderer_v1.py`: calculate the RGB of a pixel on the CPU
+2. `3dgs_renderer_v2.py`: calculate the RGB of a pixel with one Warp work item per pixel
+3. `3dgs_renderer_v3.py`: calculate the RGB from Gaussian-first tile records
+
+For Version 3, the tile-list builder is supplied. Implement the `rasterize_tile` stage using the
+ordered records for each pixel's tile.
 
 ## Assignment 2
 
-Shared starter helpers include `trainable_gaussian.py` for trainable splat arrays and
-`dssim_metrics.py` for the Unit 11 image-space loss.
+1. `3dgs_trainer_gpu.py`: implement the backward rendering pass.
 
 The gradient-check starter is `scripts/gradient_check.py`; run it after implementing the Unit 9
 backward pass. The evaluation starter is `scripts/evaluate.py`; it is intended to report PSNR and
