@@ -1,7 +1,7 @@
 """Gaussian-first tiled Warp 3DGS renderer.
 
 Usage:
-    python 3dgs_rendered_splat_gpu.py point_cloud.ply render.png --device cpu
+    python 3dgs_renderer_v3.py point_cloud.ply render.png --device cpu
 
 This version uses Gaussian-first traversal to build tile lists: each projected Gaussian emits a
 record for every screen-space tile touched by its bounding box. The raster kernel then launches one
