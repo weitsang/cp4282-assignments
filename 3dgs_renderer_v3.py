@@ -1,7 +1,7 @@
 """Gaussian-first tiled Warp 3DGS renderer.
 
 Usage:
-    python 3dgs_renderer_v3.py point_cloud.ply render.png --device cpu
+    python 3dgs_rendered_splat_gpu.py point_cloud.ply render.png --device cpu
 
 This version uses Gaussian-first traversal to build tile lists: each projected Gaussian emits a
 record for every screen-space tile touched by its bounding box. The raster kernel then launches one
@@ -18,22 +18,29 @@ import numpy as np
 from PIL import Image
 import warp as wp
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_v1")
-_shared_path = Path(__file__).resolve().parent / "shared"
-if str(_shared_path) not in sys.path:
-    sys.path.insert(0, str(_shared_path))
+_reference = importlib.import_module("3dgs_renderer_v1")
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 from tile_builder import GaussianFirstTileBuilder
 
-Camera = _cpu_renderer.Camera
-GaussianSet = _cpu_renderer.GaussianSet
-project_gaussians = _cpu_renderer.project_gaussians
-SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
-ALPHA_CUTOFF = 1.0 / 255.0
+Camera = _reference.Camera
+GaussianSet = _reference.GaussianSet
+project_gaussians = _reference.project_gaussians
+SUPPORT_RADIUS_SQUARED = _reference.SUPPORT_RADIUS_SQUARED
+compact_support = _reference.compact_support
+ALPHA_CUTOFF = _reference.ALPHA_CUTOFF
 TRANSMITTANCE_CUTOFF = 1.0e-4
 
 
 @wp.kernel
-def rasterize_tile(
+def rasterize_tiles(
     centres: wp.array(dtype=wp.vec2),
     conics: wp.array(dtype=wp.vec3),
     colours: wp.array(dtype=wp.vec3),
@@ -44,6 +51,7 @@ def rasterize_tile(
     width: int,
     tile_size: int,
     tiles_x: int,
+    background: wp.vec3,
     image: wp.array(dtype=wp.vec3),
 ):
     pixel = wp.tid()
@@ -56,16 +64,12 @@ def rasterize_tile(
 
     px = float(px_i) + 0.5
     py = float(py_i) + 0.5
-
-    start = tile_offsets[tile]
-    end = tile_offsets[tile + 1]
-    for entry in range(start, end):
-        splat = int(packed_pairs[entry] & wp.uint64(0xFFFFFFFF))
-        centre = centres[splat]
-
     # TODO: Compute the RGB value at image[pixel].
-    # The following is a placeholder.
+    # Composite only this pixel's tile list, `tile_offsets[tile] .. tile_offsets[tile + 1]`,
+    # which the builder has already sorted near to far. Finish with the background
+    # weighted by the remaining transmittance, matching 3dgs_renderer_v1.
 
+    # TODO: The RHS is a placeholder
     image[pixel] = wp.vec3(0.0, 0.0, 0.0)
 
 
@@ -116,7 +120,8 @@ class GaussianFirstWarpRenderer:
             self.device,
         )
 
-    def render(self, splats: GaussianSet, camera: Camera) -> np.ndarray:
+    def render(self, splats: GaussianSet, camera: Camera,
+               background: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> np.ndarray:
         projected = project_gaussians(splats, camera)
         count = len(projected.opacities)
 
@@ -129,12 +134,7 @@ class GaussianFirstWarpRenderer:
         self.conics.assign(wp.array(projected.conics, dtype=wp.vec3, device=self.device))
         self.colours.assign(wp.array(projected.colors, dtype=wp.vec3, device=self.device))
         self.opacities.assign(wp.array(projected.opacities, dtype=wp.float32, device=self.device))
-        supports = np.zeros(count, dtype=np.float32)
-        active = projected.opacities > ALPHA_CUTOFF
-        supports[active] = np.minimum(
-            SUPPORT_RADIUS_SQUARED,
-            2.0 * np.log(projected.opacities[active] / ALPHA_CUTOFF),
-        )
+        supports = compact_support(projected.opacities)
         self.supports.assign(wp.array(supports, dtype=wp.float32, device=self.device))
         self.depths.assign(wp.array(projected.depths, dtype=wp.float32, device=self.device))
 
@@ -150,7 +150,7 @@ class GaussianFirstWarpRenderer:
         )
 
         wp.launch(
-            rasterize_tile,
+            rasterize_tiles,
             dim=self.width * self.height,
             inputs=[
                 self.centres,
@@ -163,6 +163,7 @@ class GaussianFirstWarpRenderer:
                 self.width,
                 self.tile_size,
                 self.tiles_x,
+                wp.vec3(*background),
                 self.image,
             ],
             device=self.device,

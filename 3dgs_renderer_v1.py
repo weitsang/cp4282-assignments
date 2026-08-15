@@ -19,28 +19,40 @@ from PIL import Image
 import sys
 from pathlib import Path
 
-_shared_path = Path(__file__).resolve().parents[1] / "shared"
-if str(_shared_path) not in sys.path:
-    sys.path.insert(0, str(_shared_path))
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 from camera import Camera
 from gaussian_set import GaussianSet
 from projected_gaussians import ProjectedGaussians
-# Splats are culled/composited past this many squared Mahalanobis units from centre. Shared with
-# 3dgs_trainer.py so the CPU reference and the Warp trainer agree on cutoff.
-SUPPORT_RADIUS_SQUARED = 9.0
+from splat_math import ALPHA_CUTOFF, SUPPORT_RADIUS_SQUARED, quaternion_to_matrix
+# A faint splat reaches ALPHA_CUTOFF sooner than a strong one, so it can be truncated sooner than
+# the full 3-sigma disc. `beta` scales how quickly that happens. Note the Warp trainers use
+# `compact_box.beta = 0.5`; these renderers keep 1.0, which is what v2 and v3 have always applied.
+COMPACT_BOX_BETA = 1.0
 
 
-def quaternion_to_matrix(quaternions: np.ndarray) -> np.ndarray:
-    """Convert (w, x, y, z) unit quaternions into (N, 3, 3) rotation matrices."""
-    w, x, y, z = quaternions.T
-    return np.stack(
-        (
-            1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y),
-            2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x),
-            2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y),
-        ),
-        axis=1,
-    ).reshape(-1, 3, 3).astype(np.float32)
+def compact_support(opacities: np.ndarray) -> np.ndarray:
+    """Per-splat squared-Mahalanobis cutoff.
+
+    All three renderers must use this one definition. v1 previously tested against a fixed
+    SUPPORT_RADIUS_SQUARED while v2 and v3 tested against this compact support, so the "ports"
+    truncated faint splats earlier than the reference they were meant to reproduce.
+    """
+    opacities = np.asarray(opacities, dtype=np.float32)
+    supports = np.zeros(len(opacities), dtype=np.float32)
+    visible = opacities > ALPHA_CUTOFF
+    supports[visible] = np.minimum(
+        SUPPORT_RADIUS_SQUARED,
+        COMPACT_BOX_BETA * 2.0 * np.log(opacities[visible] / ALPHA_CUTOFF),
+    )
+    return supports
 
 
 def project_gaussians(
@@ -100,15 +112,18 @@ def project_gaussians(
             np.empty((0,), np.float32),
         )
 
+    # The global sort is only pedagogical. A scalable renderer sorts per tile.
+    # Sort the visible-splat indices once, up front, so everything below is built in a single
+    # index space. Deriving `conics` before the sort and then indexing it by `order` while the
+    # other fields are indexed by the reassigned `indices` is equivalent, but leaves two
+    # permutations of the same data four lines apart and silently desynchronises if either moves.
+    indices = indices[np.argsort(depth[indices])]
+
     inverse = np.linalg.inv(covariance_screen[indices])
     conics = np.stack((inverse[:, 0, 0], inverse[:, 0, 1], inverse[:, 1, 1]), axis=1)
-
-    # The global sort is only pedagogical. A scalable renderer sorts per tile.
-    order = np.argsort(depth[indices])
-    indices = indices[order]
     return ProjectedGaussians(
         centres[indices].astype(np.float32),
-        conics[order].astype(np.float32),
+        conics.astype(np.float32),
         depth[indices].astype(np.float32),
         splats.colors[indices].astype(np.float32),
         splats.opacities[indices].astype(np.float32),
@@ -133,7 +148,7 @@ class CpuRenderer:
     def render(
         self,
         splats: GaussianSet,
-        background: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        background: tuple[float, float, float] = (1.0, 1.0, 1.0),
     ) -> np.ndarray:
         projected = project_gaussians(
             splats,
@@ -144,16 +159,18 @@ class CpuRenderer:
         )
         image = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.float32)
         background_color = np.asarray(background, dtype=np.float32)
+        supports = compact_support(projected.opacities)
 
         # Deliberately sequential: one row, one pixel, and one splat at a time.
         for py in range(self.camera.height):
             y = py + 0.5
             for px in range(self.camera.width):
                 x = px + 0.5
+                # TODO: Calculate the RGB value at (x, y)
+                # Composite the sorted splats front to back, then finish with the
+                # background weighted by the remaining transmittance.
 
-                // TODO: Calculate the RGB value at (x, y)
-
-                // TODO: The RHS is a placeholder
+                # TODO: The RHS is a placeholder
                 image[py, px] = np.zeros(3, dtype=np.float32)
 
         return image

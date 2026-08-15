@@ -1,4 +1,4 @@
-"""Warp port of the Unit 4 parallel 3DGS raster stage.
+"""Warp port of the Unit 5 parallel 3DGS raster stage.
 
 Usage:
     python 3dgs_renderer_v2.py point_cloud.ply render.png --device cpu
@@ -16,12 +16,13 @@ import numpy as np
 from PIL import Image
 import warp as wp
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_v1")
-Camera = _cpu_renderer.Camera
-GaussianSet = _cpu_renderer.GaussianSet
-project_gaussians = _cpu_renderer.project_gaussians
-SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
-ALPHA_CUTOFF = 1.0 / 255.0
+_reference = importlib.import_module("3dgs_renderer_v1")
+Camera = _reference.Camera
+GaussianSet = _reference.GaussianSet
+project_gaussians = _reference.project_gaussians
+SUPPORT_RADIUS_SQUARED = _reference.SUPPORT_RADIUS_SQUARED
+compact_support = _reference.compact_support
+ALPHA_CUTOFF = _reference.ALPHA_CUTOFF
 TRANSMITTANCE_CUTOFF = 1.0e-4
 
 
@@ -34,14 +35,18 @@ def rasterize(
     supports: wp.array(dtype=wp.float32),
     count: int,
     width: int,
+    background: wp.vec3,
     image: wp.array(dtype=wp.vec3),
 ):
     pixel = wp.tid()
     px = float(pixel % width) + 0.5
     py = float(pixel // width) + 0.5
-    
     # TODO: Calculate the RGB at pixel (px, py)
+    # One work item per pixel: walk the globally depth-sorted splats, accumulate
+    # front to back, and composite the background with the leftover transmittance.
+    # This must reproduce 3dgs_renderer_v1 exactly.
 
+    # TODO: The RHS is a placeholder
     image[pixel] = wp.vec3(0.0, 0.0, 0.0)
 
 
@@ -58,7 +63,8 @@ class WarpRenderer:
         self.supports = wp.zeros(maximum_splats, dtype=wp.float32, device=self.device)
         self.image = wp.zeros(width * height, dtype=wp.vec3, device=self.device)
 
-    def render(self, splats: GaussianSet, camera: Camera) -> np.ndarray:
+    def render(self, splats: GaussianSet, camera: Camera,
+               background: tuple[float, float, float] = (1.0, 1.0, 1.0)) -> np.ndarray:
         projected = project_gaussians(splats, camera)
         count = len(projected.opacities)
         if count > self.maximum_splats:
@@ -67,15 +73,11 @@ class WarpRenderer:
         self.conics.assign(wp.array(projected.conics, dtype=wp.vec3, device=self.device))
         self.colours.assign(wp.array(projected.colors, dtype=wp.vec3, device=self.device))
         self.opacities.assign(wp.array(projected.opacities, dtype=wp.float32, device=self.device))
-        supports = np.zeros(count, dtype=np.float32)
-        active = projected.opacities > ALPHA_CUTOFF
-        supports[active] = np.minimum(
-            SUPPORT_RADIUS_SQUARED,
-            2.0 * np.log(projected.opacities[active] / ALPHA_CUTOFF),
-        )
+        supports = compact_support(projected.opacities)
         self.supports.assign(wp.array(supports, dtype=wp.float32, device=self.device))
         wp.launch(rasterize, dim=self.width * self.height,
-                  inputs=[self.centres, self.conics, self.colours, self.opacities, self.supports, count, self.width, self.image],
+                  inputs=[self.centres, self.conics, self.colours, self.opacities, self.supports,
+                          count, self.width, wp.vec3(*background), self.image],
                   device=self.device)
         return self.image.numpy().reshape(self.height, self.width, 3)
 
