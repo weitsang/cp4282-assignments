@@ -13,10 +13,10 @@ from pathlib import Path
 
 from evaluator_common import evaluate_views, load_reference_views
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
-Camera = _cpu_renderer.Camera
-CpuRenderer = _cpu_renderer.CpuRenderer
-GaussianSet = _cpu_renderer.GaussianSet
+_reference_renderer = importlib.import_module("3dgs_renderer_v1")
+Camera = _reference_renderer.Camera
+CpuRenderer = _reference_renderer.CpuRenderer
+GaussianSet = _reference_renderer.GaussianSet
 
 
 def main() -> None:

@@ -1,7 +1,7 @@
 """Train one anisotropic 3D Gaussian against synthetic target images with Warp.
 
 Usage:
-    python 3dgs_1_syn_trainer_gpu.py training.png --device cpu --iterations 800
+    python 3dgs_1_syn_trainer.py training.png --device cpu --iterations 800
 
 This is the Unit 8 teaching trainer. It keeps the scene deliberately tiny: one Gaussian,
 three known cameras, synthetic target images, and no tiling or densification. The goal is to
@@ -19,12 +19,25 @@ import numpy as np
 from PIL import Image
 import warp as wp
 
+import sys
+
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+
+
 from trainable_gaussian import TrainableGaussianSet
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
-Camera = _cpu_renderer.Camera
-CpuRenderer = _cpu_renderer.CpuRenderer
-GaussianSet = _cpu_renderer.GaussianSet
+_reference_renderer = importlib.import_module("3dgs_renderer_v1")
+Camera = _reference_renderer.Camera
+CpuRenderer = _reference_renderer.CpuRenderer
+GaussianSet = _reference_renderer.GaussianSet
 
 
 WIDTH = 96

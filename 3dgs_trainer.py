@@ -1,7 +1,7 @@
 """Train anisotropic 3D Gaussian splats from NeRF-synthetic posed images with Warp.
 
 Usage:
-    python 3dgs_trainer_gpu.py config/3dgs_training_gpu.yaml
+    python 3dgs_trainer.py config/3dgs_training_gpu.yaml
 
 The data directory contains transforms_train.json and its RGBA image files. Warp owns the
 parallel raster, explicit backward pass, and Adam updates. Python owns image loading, camera
@@ -20,15 +20,28 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import warp as wp
+
+import sys
+
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+
 from warp.optim import Adam
 import yaml
 
 from trainable_gaussian import TrainableGaussianSet
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
-GaussianSet = _cpu_renderer.GaussianSet
-SUPPORT_RADIUS_SQUARED = _cpu_renderer.SUPPORT_RADIUS_SQUARED
-quaternion_to_matrix = _cpu_renderer.quaternion_to_matrix
+_reference_renderer = importlib.import_module("3dgs_renderer_v1")
+GaussianSet = _reference_renderer.GaussianSet
+SUPPORT_RADIUS_SQUARED = _reference_renderer.SUPPORT_RADIUS_SQUARED
+quaternion_to_matrix = _reference_renderer.quaternion_to_matrix
 
 
 DEFAULT_RESOLUTION = 256

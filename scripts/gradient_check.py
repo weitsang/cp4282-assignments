@@ -1,6 +1,6 @@
 """Finite-difference regression checks for the Unit 9 Warp trainer.
 
-Run from the repository root, after implementing the `3dgs_trainer_gpu.py` backward pass:
+Run from the repository root, after implementing the `3dgs_trainer.py` backward pass:
 
     python scripts/gradient_check.py
     python scripts/gradient_check.py --device cuda:0
@@ -23,10 +23,10 @@ import warp as wp
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-_cpu_renderer = importlib.import_module("3dgs_renderer_cpu")
-GaussianSet = _cpu_renderer.GaussianSet
+_reference_renderer = importlib.import_module("3dgs_renderer_v1")
+GaussianSet = _reference_renderer.GaussianSet
 
-_trainer_module = importlib.import_module("3dgs_trainer_gpu")
+_trainer_module = importlib.import_module("3dgs_trainer")
 WarpImageTrainer = _trainer_module.WarpImageTrainer
 exponential_learning_rate = _trainer_module.exponential_learning_rate
 projected_covariance_diagonal = _trainer_module.projected_covariance_diagonal
