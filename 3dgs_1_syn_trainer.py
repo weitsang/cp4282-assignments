@@ -5,7 +5,7 @@ Usage:
 
 This is the Unit 8 teaching trainer. It keeps the scene deliberately tiny: one Gaussian,
 three known cameras, synthetic target images, and no tiling or densification. The goal is to
-show the training loop before the multi-Gaussian trainer adds compositing and densification.
+show the training loop before Unit 9 adds the full renderer and adaptive density control.
 """
 
 from __future__ import annotations
@@ -14,12 +14,11 @@ import argparse
 from dataclasses import dataclass
 import importlib
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 import warp as wp
-
-import sys
 
 _here = Path(__file__).resolve().parent
 if str(_here) not in sys.path:
@@ -31,9 +30,7 @@ for _candidate in (_here / "shared", _here.parent / "shared"):
             sys.path.insert(0, str(_candidate))
         break
 
-
 from trainable_gaussian import TrainableGaussianSet
-
 _reference_renderer = importlib.import_module("3dgs_renderer_v1")
 Camera = _reference_renderer.Camera
 CpuRenderer = _reference_renderer.CpuRenderer
@@ -228,7 +225,7 @@ class SyntheticTrainer:
     :class:`SyntheticScene`. Splits one training step into a forward half (render every view
     under a differentiation tape) and a backward half (propagate gradients and apply one SGD
     update), so the outer loop can report each iteration's loss before deciding whether to
-    update -- the same shape as the larger trainer, at a much smaller scale.
+    update -- the same shape as Unit 9's trainer, at a much smaller scale.
     """
 
     def __init__(self, scene: SyntheticScene, seed: int, device):
@@ -236,7 +233,7 @@ class SyntheticTrainer:
         rng = np.random.default_rng(seed)
         self.trainable = TrainableGaussianSet.random_init(count=1, rng=rng, device=self.device)
         if self.trainable.count != 1:
-            raise ValueError("This one-Gaussian trainer supports exactly one Gaussian.")
+            raise ValueError("Unit 8's renderer supports exactly one Gaussian.")
         self.cameras = wp.array(scene.cameras, dtype=wp.mat44, device=self.device)
         self.targets = wp.array(scene.targets, dtype=wp.vec3, device=self.device)
         self.image = wp.zeros(VIEWS * WIDTH * HEIGHT, dtype=wp.vec3, device=self.device)
