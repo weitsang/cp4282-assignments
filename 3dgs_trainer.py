@@ -17,7 +17,7 @@ differences and, for the sparse kernel, against the dense one at full coverage:
     python 3dgs_gradient_check_sparse_gpu.py --device cpu
 
 Usage:
-    python 3dgs_trainer_v1.py config/3dgs_training_gpu.yaml
+    python 3dgs_trainer.py config/3dgs_training_gpu.yaml
 
 The data directory contains transforms_train.json and its RGBA image files. Warp owns the
 parallel raster, explicit backward pass, and Adam updates. Python owns image loading, camera

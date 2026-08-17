@@ -1,4 +1,4 @@
-# Annotated Walkthrough: `3dgs_trainer_v1.py`
+# Annotated Walkthrough: `3dgs_trainer.py`
 
 This walkthrough explains the Assignment 2 trainer skeleton. Everything in the file is described
 except the reference bodies of the two backward kernels, which are your task.
@@ -34,7 +34,7 @@ Step 3 is the whole of your assignment. Steps 1, 2, 4 and 5 are provided.
 ## Why `importlib` Appears Again
 
 Same reason as Assignment 1. A module name cannot begin with a digit, so files like
-`3dgs_trainer_v1.py` cannot be imported with a normal `import` statement. Where this file needs a
+`3dgs_trainer.py` cannot be imported with a normal `import` statement. Where this file needs a
 neighbour it uses:
 
 ```python
@@ -475,7 +475,7 @@ settled and late pruning is armed.
 check convergence. `main` parses the config, loads views, builds the trainer, and calls it.
 
 ```bash
-python 3dgs_trainer_v1.py config/3dgs_training_gpu.yaml
+python 3dgs_trainer.py config/3dgs_training_gpu.yaml
 ```
 
 ## Checking Your Work

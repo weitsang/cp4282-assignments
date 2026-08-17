@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "shared"))
 
 from gaussian_set import GaussianSet
 
-_base_trainer = importlib.import_module("3dgs_trainer_v1")
+_base_trainer = importlib.import_module("3dgs_trainer")
 WarpImageTrainer = _base_trainer.WarpImageTrainer
 exponential_learning_rate = _base_trainer.exponential_learning_rate
 projected_covariance_diagonal = _base_trainer.projected_covariance_diagonal

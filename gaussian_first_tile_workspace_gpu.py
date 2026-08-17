@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import warp as wp
 
-_base_trainer = importlib.import_module("3dgs_trainer_v1")
+_base_trainer = importlib.import_module("3dgs_trainer")
 _shared_path = Path(__file__).resolve().parent / "shared"
 if str(_shared_path) not in sys.path:
     sys.path.insert(0, str(_shared_path))

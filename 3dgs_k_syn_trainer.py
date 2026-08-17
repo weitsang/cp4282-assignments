@@ -1,14 +1,14 @@
 """Train three overlapping coloured Gaussians against synthetic views with Warp.
 
 Usage:
-    python 3dgs_k_syn_trainer_gpu.py multi.png --device cpu --iterations 800
+    python 3dgs_k_syn_trainer.py multi.png --device cpu --iterations 800
 
 This is the Unit 8 extension after the one-Gaussian program. It keeps the same small synthetic
 scene and Warp tape, but alpha-composites several trainable splats for every pixel, and introduces
 adaptive density control -- gradient-ranked clone/split, growing a fixed-capacity pool -- so that a
-random initialization that leaves one target under-covered can still recover. The full image-based
-trainer later reuses this same general structure with real posed images, tiled rendering, Adam, and
-larger splat pools.
+random initialization that leaves one target under-covered can still recover. Unit 9's full
+trainer reuses this same densify_and_prune, adding multi-view scoring and late pruning on top.
+Tile assignment, Adam, and the full multi-splat trainer belong to Unit 9.
 """
 
 from __future__ import annotations
@@ -17,14 +17,23 @@ import argparse
 from dataclasses import dataclass
 import importlib
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 import warp as wp
 
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 from trainable_gaussian import TrainableGaussianSet
-
-_one_gaussian = importlib.import_module("3dgs_1_syn_trainer_gpu")
+_one_gaussian = importlib.import_module("3dgs_1_syn_trainer")
 FOCAL_LENGTH = _one_gaussian.FOCAL_LENGTH
 HEIGHT = _one_gaussian.HEIGHT
 VIEWS = _one_gaussian.VIEWS
@@ -48,7 +57,7 @@ LEARNING_RATES = {
     "color_lr": 24.0,
 }
 
-# Same values as the later full trainer's densification config: check every 100 iterations, add
+# Same reference values as Unit 9's densification config: check every 100 iterations, add
 # splats equal to half the currently active count, stop halfway through the run, and treat a
 # splat as "large" once its biggest scale exceeds 1% of the scene radius.
 DENSIFY_INTERVAL = 100
@@ -59,9 +68,10 @@ PERCENT_DENSE = 0.01
 def depth_order(means: np.ndarray, cameras: np.ndarray) -> np.ndarray:
     """Return near-to-far splat IDs for each view, for the splats currently at `means`.
 
-    Depth order is a discrete, non-differentiable event. This program holds the order fixed
-    between refreshes and recomputes it from the trainable splats' own positions each time
-    densify_and_prune changes which splats exist.
+    Depth order is a discrete, non-differentiable event -- see "Depth order, refreshed when the
+    splat population changes" in Unit 8. This program holds the order fixed between refreshes and
+    recomputes it (from the trainable splats' own positions) each time densify_and_prune changes
+    which splats exist, the same moments Unit 9 rebuilds its tile-local depth lists.
     """
     orders = []
     for camera in cameras:
@@ -79,7 +89,7 @@ def camera_world_position(world_to_camera: np.ndarray) -> np.ndarray:
 
 def quaternion_to_rotation(quaternion: np.ndarray) -> np.ndarray:
     """Return the 3x3 rotation matrix for one (w, x, y, z) quaternion, columns matching the
-    renderer's local frame, used to sample split offsets."""
+    renderer's local frame -- same construction as Unit 9, used to sample split offsets."""
     qw, qx, qy, qz = quaternion / max(float(np.linalg.norm(quaternion)), 1.0e-8)
     return np.stack((
         np.array([1.0 - 2.0 * (qy * qy + qz * qz), 2.0 * (qx * qy + qw * qz), 2.0 * (qx * qz - qw * qy)]),
@@ -126,8 +136,8 @@ class SyntheticMultiScene:
 
 def initial_population(rng: np.random.Generator, device) -> tuple[TrainableGaussianSet, np.ndarray]:
     """CAPACITY trainable splats: the first INITIAL_SPLATS start active and randomly placed,
-    like the one-splat program; the rest start inactive until densify_and_prune activates
-    them, the same fixed-capacity, active-mask shape used by the full splat pool later.
+    like Unit 8's one-splat program; the rest start inactive until densify_and_prune activates
+    them, the same fixed-capacity, active-mask shape Unit 9 uses for its full splat pool.
 
     Active and dormant slots draw from the same distribution, so one `random_init(CAPACITY, ...)`
     call is equivalent to the two smaller calls it replaces -- without the extra device-to-host
@@ -191,7 +201,7 @@ class MultiGaussianTrainer:
         self.image = wp.zeros(VIEWS * WIDTH * HEIGHT, dtype=wp.vec3, device=self.device)
         self.loss = wp.zeros(1, dtype=wp.float32, device=self.device, requires_grad=True)
         self._tape = None
-        # Same reference formula as the full trainer: 35% of the mean camera distance from origin.
+        # Same reference formula as Unit 9: 35% of the mean camera distance from the origin.
         camera_positions = np.stack([camera_world_position(c) for c in scene.cameras])
         self.scene_radius = float(np.linalg.norm(camera_positions, axis=1).mean()) * 0.35
         self.densify_until = iterations // 2
@@ -217,9 +227,9 @@ class MultiGaussianTrainer:
 
     def densify_and_prune(self, mean_gradients: np.ndarray) -> None:
         """Rank active splats by position-gradient norm, prune faded ones, then split large
-    parents (offset sampled from the parent's own covariance) or clone small ones into freed
-    or never-used capacity slots. The full trainer later applies the same idea to many posed
-    training images."""
+        parents (offset sampled from the parent's own covariance) or clone small ones into freed
+        or never-used capacity slots. Unit 9's full trainer reuses this exact structure and adds
+        multi-view scoring and late pruning on top -- see Unit 9, Stage 7-8."""
         opacity = sigmoid(self.trainable.opacity_logits.numpy())
         means = self.trainable.means.numpy()
         log_scales = self.trainable.log_scales.numpy()

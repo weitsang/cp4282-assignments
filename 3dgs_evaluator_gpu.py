@@ -16,10 +16,10 @@ import warp as wp
 
 from evaluator_common import evaluate_views, load_reference_views
 
-_gpu_renderer = importlib.import_module("3dgs_renderer_gpu")
-Camera = _gpu_renderer.Camera
-GaussianSet = _gpu_renderer.GaussianSet
-WarpRenderer = _gpu_renderer.WarpRenderer
+_warp_renderer = importlib.import_module("3dgs_renderer_v2")
+Camera = _warp_renderer.Camera
+GaussianSet = _warp_renderer.GaussianSet
+WarpRenderer = _warp_renderer.WarpRenderer
 
 
 def main() -> None:
