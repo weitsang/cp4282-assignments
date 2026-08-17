@@ -20,7 +20,15 @@ import sys
 import numpy as np
 import warp as wp
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "shared"))
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 
 from gaussian_set import GaussianSet
 

@@ -41,7 +41,15 @@ from warp.optim import Adam
 import yaml
 
 # Shared data and parameter classes are kept outside the renderer/trainer modules.
-sys.path.insert(0, str(Path(__file__).resolve().parent / "shared"))
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 
 from trainable_gaussian import TrainableGaussianSet
 from gaussian_set import GaussianSet

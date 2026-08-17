@@ -14,9 +14,15 @@ import numpy as np
 import warp as wp
 
 _base_trainer = importlib.import_module("3dgs_trainer")
-_shared_path = Path(__file__).resolve().parent / "shared"
-if str(_shared_path) not in sys.path:
-    sys.path.insert(0, str(_shared_path))
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+# `shared/` sits beside this file in the assignment repo, and one level up in the course repo.
+for _candidate in (_here / "shared", _here.parent / "shared"):
+    if _candidate.is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 import tile_builder as _tile_builder_module
 from tile_builder import GaussianFirstTileBuilder
 from time import perf_counter
