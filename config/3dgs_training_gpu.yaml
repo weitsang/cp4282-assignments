@@ -10,7 +10,7 @@ runtime:
 model:
   width: 256
   height: 256
-  capacity: 10000
+  capacity: 100000
   initial_splats: 1000
   background: white
 
