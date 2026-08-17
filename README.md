@@ -74,31 +74,33 @@ Shared support files include:
 
 ## Evaluating your output
 
-Use the evaluator scripts to compare a rendered PLY against either the training split or the held-out
-test split. They render every reference camera view, save the rendered images, and report PSNR,
-SSIM, and LPIPS.
+`3dgs_evaluator.py` renders every camera in a manifest, saves the images, and reports the metrics
+you ask for:
 
 ```bash
-python 3dgs_evaluator_cpu.py data/lego/init.ply data/lego/test \
-  --width 256 --height 256 --background white
-
-python 3dgs_evaluator_gpu.py data/lego/init.ply data/lego/test \
-  --width 256 --height 256 --background white --device cuda:0
+python 3dgs_evaluator.py outputs/warp-training.ply data/lego
 ```
 
-The second argument is the reference image directory. For `data/lego/train` and `data/lego/test`,
-the matching `transforms_train.json` or `transforms_test.json` file is found automatically. For a
-different dataset layout, pass `--manifest path/to/transforms.json`.
+It decides three things for you rather than making you pick a script:
 
-LPIPS uses PyTorch and downloads the selected network weights the first time it runs.
+- **Device.** `--arch auto` (the default) uses CUDA when Warp reports it and CPU otherwise. Force
+  it with `--arch cpu` or `--arch gpu`; asking for gpu without CUDA is an error, not a slow
+  fallback.
+- **Appearance.** If a `<ply-stem>.sh.npz` sidecar sits beside the PLY, the render uses degree-2
+  view-dependent colour. `--sh-degree 0` ignores it, `--sh-degree 2` requires it, and `--sh-npz`
+  points at one stored elsewhere. Assignment 2 produces no sidecar, so this stays off.
+- **Metrics.** `--metrics` takes any of `psnr`, `ssim`, `lpips`; all three run by default. LPIPS
+  needs PyTorch, so drop it with `--metrics psnr ssim` if you have not installed the optional
+  requirements.
 
-Each file contains `TODO` markers and a small command-line interface. The instructor regression
-implementation is kept separately and is not included in this repository.
+Use `--manifest transforms_train.json` to score against the training split instead of the
+held-out test split, and `--width`/`--height` to render at a different resolution than the
+default.
 
 ## Running checks
 
 ```bash
-python -m compileall scripts shared 3dgs_renderer_v1.py 3dgs_renderer_v2.py 3dgs_renderer_v3.py 3dgs_trainer.py 3dgs_gradient_check_gpu.py gaussian_first_tile_workspace_gpu.py 3dgs_1_syn_trainer.py 3dgs_k_syn_trainer.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
+python -m compileall scripts shared 3dgs_renderer_v1.py 3dgs_renderer_v2.py 3dgs_renderer_v3.py 3dgs_trainer.py 3dgs_gradient_check_gpu.py gaussian_first_tile_workspace_gpu.py 3dgs_1_syn_trainer.py 3dgs_k_syn_trainer.py image_metrics.py 3dgs_evaluator.py
 python scripts/check_setup.py
 ```
 
