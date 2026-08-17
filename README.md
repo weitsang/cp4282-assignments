@@ -94,16 +94,16 @@ implementation is kept separately and is not included in this repository.
 ## Running checks
 
 ```bash
-python -m compileall src scripts 3dgs_renderer_cpu.py 3dgs_renderer_gpu.py 3dgs_trainer_gpu.py trainable_gaussian.py 3dgs_1_syn_trainer_gpu.py 3dgs_k_syn_trainer_gpu.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
+python -m compileall src shared 3dgs_renderer_v1.py 3dgs_renderer_v2.py 3dgs_renderer_v3.py 3dgs_trainer_v1.py 3dgs_gradient_check_gpu.py gaussian_first_tile_workspace_gpu.py 3dgs_1_syn_trainer_gpu.py 3dgs_k_syn_trainer_gpu.py image_metrics.py evaluator_common.py 3dgs_evaluator_cpu.py 3dgs_evaluator_gpu.py
 python scripts/check_setup.py
 ```
 
-After implementing `3dgs_trainer_gpu.py`'s backward pass (Unit 9), verify it with a finite-difference
+After implementing `3dgs_trainer_v1.py`'s backward pass (Unit 9), verify it with a finite-difference
 gradient check:
 
 ```bash
-python scripts/gradient_check.py
-python scripts/gradient_check.py --device cuda:0
+python 3dgs_gradient_check_gpu.py --device cpu
+python 3dgs_gradient_check_gpu.py --device cuda:0
 ```
 
 Use `--help` on each assignment for its command-line arguments. Start with low resolution and a
