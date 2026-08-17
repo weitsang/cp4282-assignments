@@ -7,7 +7,17 @@ trainer projects trainable Gaussians on the device.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import os
+from time import perf_counter
+
 import warp as wp
+
+# Opt-in stage profiling, off by default. Attributing GPU time to a stage requires a device
+# synchronise around it, which serialises work that normally overlaps -- so leaving this on would
+# both slow training and distort the timings being measured. Enable with
+# WARP_3DGS_PROFILE_TILES=1 and read `builder.stage_times` (seconds) after a build.
+PROFILE_TILES = os.environ.get("WARP_3DGS_PROFILE_TILES", "") not in ("", "0", "false")
 
 
 @wp.kernel(enable_backward=False)
@@ -176,28 +186,43 @@ class GaussianFirstTileBuilder:
             raise ValueError("Tile-group count exceeds tile-builder capacity.")
         render_width = self.width if width is None else int(width)
         render_height = self.height if height is None else int(height)
+        self.stage_times = {}
 
-        wp.launch(
-            count_projected_tile_pairs,
-            dim=item_count,
-            inputs=[
-                centres, conics, supports, item_count, render_width, render_height,
-                self.tile_size, self.tiles_x, self.tiles_y,
-            ],
-            outputs=[self.tile_bounds, self.pair_counts],
-            device=self.device,
-        )
-        wp.utils.array_scan(
-            self.pair_counts[:item_count], self.pair_prefix[:item_count], inclusive=True
-        )
-        wp.launch(
-            copy_pair_count,
-            dim=1,
-            inputs=[self.pair_prefix, item_count],
-            outputs=[self.pair_count],
-            device=self.device,
-        )
-        pair_count = int(self.pair_count.numpy()[0])
+        @contextmanager
+        def stage(name):
+            if not PROFILE_TILES:
+                yield
+                return
+            wp.synchronize_device(self.device)
+            started = perf_counter()
+            yield
+            wp.synchronize_device(self.device)
+            self.stage_times[name] = self.stage_times.get(name, 0.0) + perf_counter() - started
+
+        with stage("1_count_pairs"):
+            wp.launch(
+                count_projected_tile_pairs,
+                dim=item_count,
+                inputs=[
+                    centres, conics, supports, item_count, render_width, render_height,
+                    self.tile_size, self.tiles_x, self.tiles_y,
+                ],
+                outputs=[self.tile_bounds, self.pair_counts],
+                device=self.device,
+            )
+        with stage("2_scan_pair_counts"):
+            wp.utils.array_scan(
+                self.pair_counts[:item_count], self.pair_prefix[:item_count], inclusive=True
+            )
+            wp.launch(
+                copy_pair_count,
+                dim=1,
+                inputs=[self.pair_prefix, item_count],
+                outputs=[self.pair_count],
+                device=self.device,
+            )
+        with stage("3_readback_pair_count"):
+            pair_count = int(self.pair_count.numpy()[0])
         if pair_count > self.tile_pair_capacity:
             raise RuntimeError(
                 f"Tile-pair capacity {self.tile_pair_capacity:,} is too small for "
@@ -210,43 +235,50 @@ class GaussianFirstTileBuilder:
             wp.synchronize_device(self.device)
             return self.tile_offsets, self.packed_pairs, 0
 
-        wp.launch(
-            emit_projected_tile_pairs,
-            dim=item_count,
-            inputs=[
-                self.tile_bounds, depths, self.pair_counts, self.pair_prefix,
-                group_ids, splat_ids, self.tiles_per_view, self.tiles_x,
-            ],
-            outputs=[self.depth_keys, self.packed_pairs],
-            device=self.device,
-        )
+        with stage("4_emit_pairs"):
+            wp.launch(
+                emit_projected_tile_pairs,
+                dim=item_count,
+                inputs=[
+                    self.tile_bounds, depths, self.pair_counts, self.pair_prefix,
+                    group_ids, splat_ids, self.tiles_per_view, self.tiles_x,
+                ],
+                outputs=[self.depth_keys, self.packed_pairs],
+                device=self.device,
+            )
         # First sort by exact depth. The second stable sort groups records while
         # preserving near-to-far order inside each group.
-        wp.utils.radix_sort_pairs(self.depth_keys, self.packed_pairs, pair_count)
-        wp.launch(
-            unpack_group_keys,
-            dim=pair_count,
-            inputs=[self.packed_pairs],
-            outputs=[self.group_keys],
-            device=self.device,
-        )
-        wp.utils.radix_sort_pairs(
-            self.group_keys,
-            self.packed_pairs,
-            pair_count,
-            end_bit=max(1, (group_count - 1).bit_length()),
-        )
-        wp.launch(
-            count_sorted_groups,
-            dim=pair_count,
-            inputs=[self.group_keys],
-            outputs=[self.group_counts],
-            device=self.device,
-        )
-        wp.utils.array_scan(
-            self.group_counts[:group_count],
-            self.tile_offsets[1:group_count + 1],
-            inclusive=True,
-        )
-        wp.synchronize_device(self.device)
+        with stage("5_sort_by_depth"):
+            wp.utils.radix_sort_pairs(self.depth_keys, self.packed_pairs, pair_count)
+        with stage("6_unpack_group_keys"):
+            wp.launch(
+                unpack_group_keys,
+                dim=pair_count,
+                inputs=[self.packed_pairs],
+                outputs=[self.group_keys],
+                device=self.device,
+            )
+        with stage("7_sort_by_group"):
+            wp.utils.radix_sort_pairs(
+                self.group_keys,
+                self.packed_pairs,
+                pair_count,
+                end_bit=max(1, (group_count - 1).bit_length()),
+            )
+        with stage("8_count_groups"):
+            wp.launch(
+                count_sorted_groups,
+                dim=pair_count,
+                inputs=[self.group_keys],
+                outputs=[self.group_counts],
+                device=self.device,
+            )
+        with stage("9_scan_offsets"):
+            wp.utils.array_scan(
+                self.group_counts[:group_count],
+                self.tile_offsets[1:group_count + 1],
+                inclusive=True,
+            )
+        with stage("10_final_sync"):
+            wp.synchronize_device(self.device)
         return self.tile_offsets, self.packed_pairs, pair_count

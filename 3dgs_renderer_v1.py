@@ -151,9 +151,9 @@ class CpuRenderer:
             for px in range(self.camera.width):
                 x = px + 0.5
 
-                // TODO: Calculate the RGB value at (x, y)
+                # TODO: Calculate the RGB value at (x, y)
 
-                // TODO: The RHS is a placeholder
+                # TODO: The RHS is a placeholder
                 image[py, px] = np.zeros(3, dtype=np.float32)
 
         return image

@@ -38,15 +38,32 @@ Annotated walkthroughs explain the provided skeleton code without showing the TO
 
 ## Assignment 2
 
-1. `3dgs_trainer_gpu.py`: implement the backward rendering pass.
+1. `3dgs_trainer_v1.py`: implement the backward rendering pass. Two kernels are marked TODO,
+   `render_backward` for the dense path and `render_sparse_backward` for the sampled one.
 
 ```bash
-python 3dgs_trainer_gpu.py config/3dgs_training_gpu.yaml
+python 3dgs_trainer_v1.py config/3dgs_training_gpu.yaml
 ```
+
+Check your gradients against finite differences before judging a training run:
+
+```bash
+python 3dgs_gradient_check_gpu.py --device cpu
+```
+
+As shipped this check fails, reporting an analytic gradient of zero: nothing accumulates into the
+gradient buffers until you write the kernels. Training also runs to completion without improving,
+for the same reason.
+
+The annotated walkthrough explains the whole file without giving the TODO solution:
+
+- `3dgs_trainer_v1_annotated.md`
 
 Shared support files include:
 
-- `trainable_gaussian.py`: trainable splat parameter storage used by the trainer
+- `shared/trainable_gaussian.py`: trainable splat parameter storage used by the trainer
+- `shared/training_config.py`: the YAML schema, defaults and validation
+- `gaussian_first_tile_workspace_gpu.py`: tile record construction used by the trainer
 - `config/`: starter YAML files for training runs
 - `3dgs_1_syn_trainer_gpu.py`: small Unit 8 trainer for one synthetic Gaussian
 - `3dgs_k_syn_trainer_gpu.py`: small Unit 8 trainer for several synthetic Gaussians

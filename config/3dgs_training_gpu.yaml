@@ -1,7 +1,7 @@
 paths:
-  data: data/lego
-  output: outputs/warp-training.png
-  init_ply: data/lego/init.ply
+  data: ../data/lego
+  output: ../outputs/warp-training.png
+  init_ply: ../data/lego/init.ply
 
 runtime:
   arch: cpu
